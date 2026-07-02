@@ -1,0 +1,27 @@
+---
+import SupersonicBrand from "./SupersonicBrand.astro";
+
+// App chrome only — never rendered on the public intake form or inside a
+// report sheet (white-label discipline).
+type Props = {
+  context?: string;
+};
+
+const { context } = Astro.props;
+---
+
+<header class="site-header">
+  <div class="site-nav">
+    <div class="site-nav-brand">
+      <a class="site-brand-link" href="/" aria-label="Supersonic Ad Manager — board">
+        <SupersonicBrand size={32} />
+      </a>
+      {context && <span class="site-context">{context}</span>}
+    </div>
+    <nav class="site-nav-actions">
+      <a class="nav-link" href="/">Board</a>
+      <a class="nav-link" href="/admin/brokerages">Brokerages</a>
+      <slot />
+    </nav>
+  </div>
+</header>

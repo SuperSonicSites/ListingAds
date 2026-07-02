@@ -1,0 +1,28 @@
+---
+import AppLayout from "../layouts/AppLayout.astro";
+import SupersonicBrand from "../components/SupersonicBrand.astro";
+
+const next = Astro.url.searchParams.get("next") ?? "/";
+const error = Astro.url.searchParams.get("error") === "1";
+---
+
+<AppLayout title="Sign in | Supersonic Ad Manager" className="app-body">
+  <main class="login-shell">
+    <section class="login-panel">
+      <div class="login-brand">
+        <SupersonicBrand size={44} />
+      </div>
+      <h1>Sign in</h1>
+      <p>Enter the team password to open the ad manager.</p>
+      {error && <p class="login-error">That password didn't match. Try again.</p>}
+      <form method="post" action="/api/login">
+        <input type="hidden" name="next" value={next} />
+        <label>
+          Password
+          <input type="password" name="password" autocomplete="current-password" required autofocus />
+        </label>
+        <button class="button primary" type="submit">Continue</button>
+      </form>
+    </section>
+  </main>
+</AppLayout>

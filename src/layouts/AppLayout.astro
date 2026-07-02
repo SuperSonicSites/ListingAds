@@ -1,0 +1,24 @@
+---
+import "../styles/global.css";
+
+type Props = {
+  title?: string;
+  className?: string;
+};
+
+const { title = "Supersonic Ad Manager", className = "" } = Astro.props;
+---
+
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <link rel="icon" type="image/svg+xml" href="/assets/supersonic-mark.svg" />
+    <meta name="theme-color" content="#ffffff" />
+    <title>{title}</title>
+  </head>
+  <body class={className}>
+    <slot />
+  </body>
+</html>

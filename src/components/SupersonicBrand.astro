@@ -1,0 +1,43 @@
+---
+// Supersonic brand lockup. With the wordmark it renders the real logo artwork
+// (public/assets/supersonic-logo.png, 200x118 stacked lockup); mark-only spots
+// (tiny toolbar contexts) keep the inline SVG plane, which stays crisp at 18px.
+type Props = {
+  size?: number;
+  wordmark?: boolean;
+};
+
+const { size = 26, wordmark = true } = Astro.props;
+// `size` historically meant the mark width; scale the full stacked lockup from it.
+const logoHeight = Math.round(size * 1.3);
+const markHeight = Math.round(size * (40 / 48));
+---
+
+{wordmark ? (
+  <img
+    class="ss-brand-logo"
+    src="/assets/supersonic-logo.png"
+    alt="Supersonic"
+    style={`height: ${logoHeight}px`}
+    width="200"
+    height="118"
+  />
+) : (
+  <span class="ss-brand">
+    <svg
+      class="ss-brand-mark"
+      width={size}
+      height={markHeight}
+      viewBox="0 0 48 40"
+      fill="none"
+      xmlns="http://www.w3.org/2000/svg"
+      role="img"
+      aria-label="Supersonic"
+    >
+      <path fill="#0d1522" d="M0.5 24.5C8.5 24 16 21.6 22.6 17.3l2 2.9C17.4 24.8 9.3 27 0.5 27Z" />
+      <path fill="#0d1522" d="M4 32.5c6.4-.5 12.2-2.3 17.3-5.5l1.6 2.5C17.4 32.9 11.2 34.6 4 34.6Z" />
+      <path fill="#29abe2" d="M46 1.5 13.5 20.5l15.5 3Z" />
+      <path fill="#0f8ac4" d="M46 1.5 29 23.5 25 37Z" />
+    </svg>
+  </span>
+)}
