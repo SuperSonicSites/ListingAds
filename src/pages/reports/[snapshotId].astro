@@ -33,6 +33,63 @@ const backHref = snapshot ? `/requests/${snapshot.request_id}` : "/";
 
 const gallery = snapshot ? snapshot.images.gallery.filter(Boolean) : [];
 
+// In-Depth Data Of Users — the nowforsale.co link's click analytics, frozen at
+// snapshot time (optional; older snapshots / no stats pulled → sheet omitted).
+// The clicks chart is server-rendered SVG: no JS, no chart lib, print-safe.
+const linkStats = snapshot?.link_stats;
+const hasLinkStats = Boolean(
+  linkStats && (linkStats.series.length > 0 || linkStats.total_clicks > 0)
+);
+
+const CHART_W = 640;
+const CHART_H = 150;
+type ChartGeometry = {
+  areaPath: string;
+  linePath: string;
+  yLabels: { value: number; y: number }[];
+  xLabels: { label: string; x: number }[];
+};
+
+function shortDate(iso: string): string {
+  const date = new Date(`${iso}T00:00:00Z`);
+  if (Number.isNaN(date.getTime())) return iso;
+  return new Intl.DateTimeFormat("en-CA", { month: "short", day: "numeric", timeZone: "UTC" }).format(date);
+}
+
+function buildChart(series: { date: string; clicks: number }[]): ChartGeometry | undefined {
+  if (series.length < 2) return undefined;
+  const max = Math.max(...series.map((point) => point.clicks), 1);
+  // Headroom + a round-ish top gridline value.
+  const top = Math.max(5, Math.ceil((max * 1.1) / 5) * 5);
+  const stepX = CHART_W / (series.length - 1);
+  const pointAt = (index: number, clicks: number) =>
+    `${(index * stepX).toFixed(1)},${(CHART_H - (clicks / top) * CHART_H).toFixed(1)}`;
+  const line = series.map((point, index) => pointAt(index, point.clicks)).join(" L");
+  const linePath = `M${line}`;
+  const areaPath = `M0,${CHART_H} L${line} L${CHART_W},${CHART_H} Z`;
+  const yLabels = [0, 1, 2, 3, 4].map((step) => ({
+    value: Math.round((top / 4) * step),
+    y: CHART_H - (CHART_H / 4) * step
+  }));
+  const labelEvery = Math.max(1, Math.ceil(series.length / 6));
+  const xLabels = series
+    .map((point, index) => ({ label: shortDate(point.date), x: index * stepX, index }))
+    .filter(({ index }) => index % labelEvery === 0 || index === series.length - 1)
+    .map(({ label, x }) => ({ label, x }));
+  return { areaPath, linePath, yLabels, xLabels };
+}
+
+const chart = hasLinkStats ? buildChart(linkStats!.series) : undefined;
+const linkLists = hasLinkStats
+  ? [
+      { title: "Top cities", rows: linkStats!.cities },
+      { title: "Top countries", rows: linkStats!.countries },
+      { title: "Top browsers", rows: linkStats!.browsers },
+      { title: "Top operating systems", rows: linkStats!.os },
+      { title: "Top referrers", rows: linkStats!.referrers }
+    ].filter((list) => list.rows.length > 0)
+  : [];
+
 // REALTOR.ca — all present panes stacked on one sheet (omit missing/waived).
 const realtorImages = snapshot
   ? [
@@ -213,7 +270,83 @@ const reportBrandStyle = snapshot
           )}
         </section>
 
-        <!-- S3 · REALTOR.ca MLS STATS -->
+        <!-- S3 · IN-DEPTH DATA OF USERS (short.io link analytics) -->
+        {hasLinkStats && (
+          <section class="report-sheet exr-depth-sheet">
+            <h2 class="exr-heading">In-Depth Data Of Users:</h2>
+            <p class="exr-caption">Ad campaign geo-targeting, user insights and visitor clicks on the listing.</p>
+
+            {chart && (
+              <div class="exr-chart-card">
+                <div class="exr-chart-title">Clicks</div>
+                <div class="exr-chart-body">
+                  <div class="exr-chart-y">
+                    {chart.yLabels
+                      .slice()
+                      .reverse()
+                      .map((label) => (
+                        <span>{formatNumber(label.value)}</span>
+                      ))}
+                  </div>
+                  <div class="exr-chart-plot">
+                    <svg
+                      viewBox={`0 0 ${CHART_W} ${CHART_H}`}
+                      preserveAspectRatio="none"
+                      role="img"
+                      aria-label="Clicks per day"
+                    >
+                      {chart.yLabels.map((label) => (
+                        <line x1="0" y1={label.y} x2={CHART_W} y2={label.y} class="exr-gridline" />
+                      ))}
+                      <path d={chart.areaPath} class="exr-area" />
+                      <path d={chart.linePath} class="exr-line" />
+                    </svg>
+                    <div class="exr-chart-x">
+                      {chart.xLabels.map((label) => (
+                        <span style={`left: ${(label.x / CHART_W) * 100}%`}>{label.label}</span>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            <div class="exr-stat-tiles">
+              <div class="exr-stat-tile">
+                <span>Total clicks</span>
+                <strong>{formatNumber(linkStats!.total_clicks)}</strong>
+                <small>campaign period</small>
+              </div>
+              <div class="exr-stat-tile">
+                <span>Human clicks</span>
+                <strong>{formatNumber(linkStats!.human_clicks)}</strong>
+                <small>campaign period</small>
+              </div>
+            </div>
+
+            <div class="exr-list-grid">
+              {linkLists.map((list) => {
+                const max = Math.max(...list.rows.map((row) => row.clicks), 1);
+                return (
+                  <div class="exr-list-card">
+                    <div class="exr-list-title">{list.title}</div>
+                    {list.rows.map((row) => (
+                      <div class="exr-list-row">
+                        <span class="exr-list-name">{row.name}</span>
+                        <span class="exr-list-count">{formatNumber(row.clicks)}</span>
+                        <span class="exr-list-bar">
+                          <span style={`width: ${Math.max(2, Math.round((row.clicks / max) * 100))}%`} />
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                );
+              })}
+            </div>
+          </section>
+        )}
+
+        <!-- S4 · REALTOR.ca MLS STATS -->
         {realtorImages.length > 0 && (
           <section class="report-sheet exr-realtor-sheet">
             <h2 class="exr-heading">7, 30, 90 Day Realtor.ca MLS Stats:</h2>
@@ -522,11 +655,179 @@ const reportBrandStyle = snapshot
   }
 
   .exr-realtor-sheet,
+  .exr-depth-sheet,
   .exr-stats-sheet {
     gap: 14px;
   }
 
-  /* S3 · REALTOR.ca — three panes stacked ------------------------------------*/
+  /* S3 · In-Depth (short.io link analytics) ----------------------------------*/
+  .exr-chart-card {
+    border: 1px solid #e7e5e0;
+    border-radius: 10px;
+    padding: 12px 16px 24px;
+  }
+
+  .exr-chart-title {
+    margin-bottom: 10px;
+    color: #1b1b1b;
+    font-size: 0.9rem;
+    font-weight: 700;
+  }
+
+  .exr-chart-body {
+    display: flex;
+    gap: 8px;
+  }
+
+  .exr-chart-y {
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    padding-bottom: 2px;
+    color: #837c6f;
+    font-size: 0.62rem;
+    text-align: right;
+  }
+
+  .exr-chart-plot {
+    position: relative;
+    flex: 1;
+    min-width: 0;
+  }
+
+  .exr-chart-plot svg {
+    display: block;
+    width: 100%;
+    height: 1.25in;
+  }
+
+  .exr-gridline {
+    stroke: #efede8;
+    stroke-width: 1;
+  }
+
+  .exr-area {
+    fill: color-mix(in srgb, var(--client-accent, #2fbfa7) 18%, #ffffff);
+  }
+
+  .exr-line {
+    fill: none;
+    stroke: var(--client-accent, #2fbfa7);
+    stroke-width: 2;
+  }
+
+  .exr-chart-x {
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: -18px;
+    height: 14px;
+  }
+
+  .exr-chart-x span {
+    position: absolute;
+    transform: translateX(-50%);
+    color: #837c6f;
+    font-size: 0.62rem;
+    white-space: nowrap;
+  }
+
+  .exr-stat-tiles {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 12px;
+  }
+
+  .exr-stat-tile {
+    display: grid;
+    gap: 1px;
+    border: 1px solid #e7e5e0;
+    border-radius: 10px;
+    padding: 7px 14px;
+  }
+
+  .exr-stat-tile span {
+    color: #1b1b1b;
+    font-size: 0.78rem;
+    font-weight: 700;
+  }
+
+  .exr-stat-tile strong {
+    color: #1b1b1b;
+    font-size: 1.3rem;
+    font-weight: 780;
+    line-height: 1.1;
+  }
+
+  .exr-stat-tile small {
+    color: #837c6f;
+    font-size: 0.66rem;
+  }
+
+  .exr-list-grid {
+    display: grid;
+    flex: 1;
+    min-height: 0;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 12px;
+    align-content: start;
+  }
+
+  .exr-list-card {
+    border: 1px solid #e7e5e0;
+    border-radius: 10px;
+    padding: 8px 12px;
+  }
+
+  .exr-list-title {
+    margin-bottom: 6px;
+    color: #1b1b1b;
+    font-size: 0.78rem;
+    font-weight: 700;
+  }
+
+  .exr-list-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-areas: "name count" "bar bar";
+    column-gap: 8px;
+    padding: 1.5px 0;
+  }
+
+  .exr-list-name {
+    grid-area: name;
+    overflow: hidden;
+    color: #37352f;
+    font-size: 0.7rem;
+    font-weight: 600;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .exr-list-count {
+    grid-area: count;
+    color: #1b1b1b;
+    font-size: 0.7rem;
+    font-weight: 700;
+  }
+
+  .exr-list-bar {
+    grid-area: bar;
+    display: block;
+    height: 3px;
+    margin-top: 2px;
+    border-radius: 999px;
+    background: #efede8;
+  }
+
+  .exr-list-bar span {
+    display: block;
+    height: 100%;
+    border-radius: 999px;
+    background: var(--client-accent, #2fbfa7);
+  }
+
+  /* S4 · REALTOR.ca — three panes stacked ------------------------------------*/
   .exr-realtor-stack {
     display: flex;
     min-height: 0;

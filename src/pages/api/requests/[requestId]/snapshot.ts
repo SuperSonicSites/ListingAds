@@ -49,6 +49,55 @@ function singleAssetId(request: AdRequest, kind: string): string | undefined {
   return request.assets.find((asset) => asset.kind === kind)?.id;
 }
 
+function coerceCount(value: unknown): number {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed >= 0 ? Math.round(parsed) : 0;
+}
+
+function coerceNameCounts(raw: unknown, cap = 7): { name: string; clicks: number }[] {
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .map((row: any) => ({ name: String(row?.name ?? "").trim().slice(0, 60), clicks: coerceCount(row?.clicks) }))
+    .filter((row) => row.name)
+    .slice(0, cap);
+}
+
+// The builder's "Pull short.io stats" stores the full LinkStatsResult in a
+// hidden JSON field; the two totals stay editable inputs (manual-fallback
+// invariant). Malformed/absent JSON → undefined → the In-Depth sheet is omitted.
+function parseLinkStats(
+  raw: string,
+  totalOverride: number | null,
+  humanOverride: number | null
+): ExecReportSnapshot["link_stats"] {
+  let parsed: any;
+  try {
+    parsed = raw ? JSON.parse(raw) : undefined;
+  } catch {
+    parsed = undefined;
+  }
+  const series = Array.isArray(parsed?.series)
+    ? parsed.series
+        .map((point: any) => ({
+          date: String(point?.date ?? "").slice(0, 10),
+          clicks: coerceCount(point?.clicks)
+        }))
+        .filter((point: { date: string }) => /^\d{4}-\d{2}-\d{2}$/.test(point.date))
+        .slice(0, 60)
+    : [];
+  const stats = {
+    total_clicks: totalOverride ?? coerceCount(parsed?.total_clicks),
+    human_clicks: humanOverride ?? coerceCount(parsed?.human_clicks),
+    series,
+    cities: coerceNameCounts(parsed?.cities),
+    countries: coerceNameCounts(parsed?.countries),
+    browsers: coerceNameCounts(parsed?.browsers),
+    os: coerceNameCounts(parsed?.os),
+    referrers: coerceNameCounts(parsed?.referrers)
+  };
+  return stats.series.length > 0 || stats.total_clicks > 0 ? stats : undefined;
+}
+
 export const POST: APIRoute = async ({ params, request }) => {
   if (!isAdmin(request)) {
     return errorPage(401, "Admin sign-in required.", "/login");
@@ -147,6 +196,12 @@ export const POST: APIRoute = async ({ params, request }) => {
     sampleImages = (await Promise.all(fallbackIds.map((id) => embedAsset(adRequest, id)))).filter(Boolean);
   }
 
+  const linkStats = parseLinkStats(
+    field(form, "link_stats_json"),
+    field(form, "link_total_clicks") ? numberField(form, "link_total_clicks") : null,
+    field(form, "link_human_clicks") ? numberField(form, "link_human_clicks") : null
+  );
+
   const snapshot: ExecReportSnapshot = {
     request_id: adRequest.id,
     created_at: new Date().toISOString(),
@@ -184,6 +239,7 @@ export const POST: APIRoute = async ({ params, request }) => {
       reach,
       clicks_all: clicksAll
     },
+    ...(linkStats ? { link_stats: linkStats } : {}),
     ad_sample: {
       text: sampleText,
       images: sampleImages

@@ -4,6 +4,7 @@ import { isHttpUrl, json } from "../../../../lib/http";
 import { readRequest, writeRequest } from "../../../../lib/storage";
 import { fetchAdCreative, fetchCampaignInsights } from "../../../../lib/metaAds";
 import { captureRealtorStats } from "../../../../lib/realtorCapture";
+import { fetchLinkStats } from "../../../../lib/shortio";
 
 export const prerender = false;
 
@@ -60,6 +61,14 @@ export const POST: APIRoute = async ({ params, request }) => {
     return json(200, result);
   }
 
+  if (mode === "linkstats") {
+    if (!adRequest.short_link) {
+      return json(400, { error: "Create the nowforsale.co short link first — its click stats feed this page." });
+    }
+    const result = await fetchLinkStats(adRequest.short_link.link_id ?? "");
+    return json(200, result);
+  }
+
   if (mode === "realtor") {
     // The builder can send an edited stats_link to correct a client's bad link.
     // When present, validate it, save it to the request (fresh read → set →
@@ -81,5 +90,5 @@ export const POST: APIRoute = async ({ params, request }) => {
     return json(200, result);
   }
 
-  return json(400, { error: 'Unknown mode — use "stats", "creative", or "realtor".' });
+  return json(400, { error: 'Unknown mode — use "stats", "creative", "linkstats", or "realtor".' });
 };

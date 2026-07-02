@@ -179,6 +179,19 @@ export type ExecReportSnapshot = {
     reach: number;
     clicks_all: number;
   };
+  // "In-Depth Data Of Users" — the nowforsale.co link's click analytics pulled
+  // from the short.io statistics API and frozen at snapshot time. Optional:
+  // absent (no stats pulled / older snapshots) simply omits the sheet.
+  link_stats?: {
+    total_clicks: number;
+    human_clicks: number;
+    series: { date: string; clicks: number }[];
+    cities: { name: string; clicks: number }[];
+    countries: { name: string; clicks: number }[];
+    browsers: { name: string; clicks: number }[];
+    os: { name: string; clicks: number }[];
+    referrers: { name: string; clicks: number }[];
+  };
   // Sample Overview — the ad caption + photos (fetched from the Marketing API or
   // falling back to the published post), rendered as a native Facebook-style
   // mockup. images are data URIs (max 4), embedded at freeze time.

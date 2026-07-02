@@ -23,12 +23,15 @@ Internal tool for managing listing ad campaigns end-to-end:
    in-process reminder emails the team (Mon–Fri 9–5 PT, daily while overdue)
    with the exact task string.
 6. **Reporting** — the report builder pulls campaign insights (impressions,
-   reach, all clicks) + region and age/gender breakdowns from the Marketing
-   API, fetches the ad's caption + photos from the Marketing API for the
-   Facebook-style Sample Overview (falling back to the published post's text
-   and photos, or a manual Ads Manager screenshot), takes hero + 6 listing
-   photos and fetched REALTOR.ca 7/30/90-day screenshots (from the client's
-   share link, with manual upload as the fallback), and freezes an
+   reach, all clicks) from the Marketing API, fetches the ad's caption + photos
+   from the Marketing API for the Facebook-style Sample Overview (falling back
+   to the published post's text and photos, or a manual Ads Manager
+   screenshot), pulls the nowforsale.co link's click analytics from the
+   short.io statistics API (rendered natively as the "In-Depth Data Of Users"
+   page: clicks chart, totals, top cities/countries/browsers/systems/
+   referrers), takes hero + 6 listing photos and fetched REALTOR.ca
+   7/30/90-day screenshots (from the client's share link, with manual upload
+   as the fallback), and freezes an
    immutable snapshot rendered as the branded Executive Report (HTML → Letter
    PDF). "Send Executive Report" emails the PDF to the client ("Happy
    {weekday}!"), then the card auto-completes.

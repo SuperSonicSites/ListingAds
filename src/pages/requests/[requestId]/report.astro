@@ -35,6 +35,7 @@ const photoAssets = assets.filter((asset) =>
 const previewMobile = single("ad_preview_mobile");
 const previewDesktop = single("ad_preview_desktop");
 const hasCampaignId = Boolean(request?.fb_campaign_id);
+const hasShortLink = Boolean(request?.short_link);
 const adSampleText = request?.post.final_text ?? "";
 const realtorSlots = [
   { kind: "realtor_7", label: "7 Day" },
@@ -97,6 +98,7 @@ const title = request ? `Report builder — ${request.listing_address}` : "Reque
         data-request-id={request.id}
       >
         <input type="hidden" name="insights_source" id="insights_source" value="manual" />
+        <input type="hidden" name="link_stats_json" id="link_stats_json" value="" />
         <input type="hidden" name="hero_id" id="hero_id" value="" />
         <input type="hidden" name="gallery_ids" id="gallery_ids" value="" />
         <input type="hidden" name="ad_sample_image_urls" id="ad_sample_image_urls" value="" />
@@ -235,10 +237,64 @@ const title = request ? `Report builder — ${request.listing_address}` : "Reque
           </div>
         </section>
 
-        <!-- 03 · Listing photos -->
+        <!-- 03 · Link analytics (In-Depth Data) -->
         <section class="client-form-card">
           <header class="client-section-header">
             <span>03</span>
+            <div>
+              <h2>Link analytics</h2>
+              <p>
+                The nowforsale.co link's click stats — rendered as the report's "In-Depth Data Of Users"
+                page (clicks chart, totals, top cities / countries / browsers / systems / referrers).
+              </p>
+            </div>
+          </header>
+          <div class="client-review-area">
+            <div class="client-pull-strip">
+              <div class="client-pull-status">
+                <span></span>
+                <div>
+                  <strong>short.io click statistics</strong>
+                  <small>
+                    Source: <span class="source-badge" id="linkstats-source">Manual</span>
+                  </small>
+                </div>
+              </div>
+              <button
+                type="button"
+                class="client-pull-button"
+                id="pull-linkstats"
+                data-has-link={hasShortLink ? "1" : ""}
+                disabled={!hasShortLink}
+              >
+                Pull short.io stats
+              </button>
+            </div>
+            {!hasShortLink && (
+              <p class="import-fetch-notice">
+                Create the nowforsale.co short link on the request page first — its click stats feed this page.
+              </p>
+            )}
+            <div id="linkstats-warnings"></div>
+
+            <div class="client-field-grid two">
+              <label class="client-field">
+                <span>Total clicks</span>
+                <input type="number" name="link_total_clicks" id="link_total_clicks" min="0" step="1" inputmode="numeric" placeholder="0" />
+              </label>
+              <label class="client-field">
+                <span>Human clicks</span>
+                <input type="number" name="link_human_clicks" id="link_human_clicks" min="0" step="1" inputmode="numeric" placeholder="0" />
+              </label>
+            </div>
+            <p class="hint-line" id="linkstats-preview" hidden></p>
+          </div>
+        </section>
+
+        <!-- 04 · Listing photos -->
+        <section class="client-form-card">
+          <header class="client-section-header">
+            <span>04</span>
             <div>
               <h2>Listing photos</h2>
               <p>
@@ -275,7 +331,7 @@ const title = request ? `Report builder — ${request.listing_address}` : "Reque
         <!-- 04 · REALTOR.ca stats -->
         <section class="client-form-card">
           <header class="client-section-header">
-            <span>04</span>
+            <span>05</span>
             <div>
               <h2>REALTOR.ca stats</h2>
               <p>
@@ -340,7 +396,7 @@ const title = request ? `Report builder — ${request.listing_address}` : "Reque
         <!-- 05 · Prepared by -->
         <section class="client-form-card">
           <header class="client-section-header">
-            <span>05</span>
+            <span>06</span>
             <div>
               <h2>Prepared by</h2>
               <p>Shown on the report's disclaimer page and footer. Edit freely before generating.</p>
@@ -434,6 +490,12 @@ const title = request ? `Report builder — ${request.listing_address}` : "Reque
     const creativeThumbs = document.getElementById("creative-thumbs") as HTMLElement;
     const creativeThumbsEmpty = document.getElementById("creative-thumbs-empty") as HTMLElement;
     const pickSummary = document.getElementById("pick-summary") as HTMLElement;
+    const linkStatsJson = document.getElementById("link_stats_json") as HTMLInputElement;
+    const linkTotal = document.getElementById("link_total_clicks") as HTMLInputElement;
+    const linkHuman = document.getElementById("link_human_clicks") as HTMLInputElement;
+    const linkstatsSource = document.getElementById("linkstats-source") as HTMLElement;
+    const linkstatsWarnings = document.getElementById("linkstats-warnings") as HTMLElement;
+    const linkstatsPreview = document.getElementById("linkstats-preview") as HTMLElement;
 
     const sourceLabel = (source: string) =>
       source === "meta_api" ? "Meta API" : source === "mock" ? "Mock" : "Manual";
@@ -527,6 +589,10 @@ const title = request ? `Report builder — ${request.listing_address}` : "Reque
         ad_sample_text: adSampleText.value,
         ad_sample_image_urls: adSampleUrls.value,
         creative_badge: creativeSource.textContent,
+        link_stats_json: linkStatsJson.value,
+        link_total: linkTotal.value,
+        link_human: linkHuman.value,
+        linkstats_badge: linkstatsSource.textContent,
         fields: {} as Record<string, string>
       };
       for (const name of ["prepared_by", "website", "brokerage_address", "contact_line"]) {
@@ -561,6 +627,13 @@ const title = request ? `Report builder — ${request.listing_address}` : "Reque
           renderCreativeThumbs();
         }
         if (state.creative_badge) creativeSource.textContent = state.creative_badge;
+        if (typeof state.link_stats_json === "string") {
+          linkStatsJson.value = state.link_stats_json;
+          renderLinkstatsPreview();
+        }
+        if (state.link_total) linkTotal.value = state.link_total;
+        if (state.link_human) linkHuman.value = state.link_human;
+        if (state.linkstats_badge) linkstatsSource.textContent = state.linkstats_badge;
         const validIds = new Set(picks.map((pick) => pick.dataset.assetId ?? ""));
         if (typeof state.hero === "string" && validIds.has(state.hero)) heroId = state.hero;
         if (Array.isArray(state.gallery)) {
@@ -754,6 +827,59 @@ const title = request ? `Report builder — ${request.listing_address}` : "Reque
       });
     }
 
+    // --- Pull short.io link stats (In-Depth Data) ----------------------------
+    function renderLinkstatsPreview() {
+      try {
+        const stats = JSON.parse(linkStatsJson.value || "null");
+        if (!stats) {
+          linkstatsPreview.hidden = true;
+          return;
+        }
+        const top = (list: { name: string; clicks: number }[] | undefined, label: string) =>
+          Array.isArray(list) && list.length ? `${label}: ${list[0].name} (${list[0].clicks})` : "";
+        const bits = [top(stats.cities, "Top city"), top(stats.browsers, "Top browser"), top(stats.referrers, "Top referrer")].filter(Boolean);
+        linkstatsPreview.textContent = bits.length
+          ? `Frozen into the report — ${bits.join(" · ")}, ${Array.isArray(stats.series) ? stats.series.length : 0}-day clicks chart.`
+          : "";
+        linkstatsPreview.hidden = bits.length === 0;
+      } catch {
+        linkstatsPreview.hidden = true;
+      }
+    }
+
+    const linkstatsButton = document.getElementById("pull-linkstats") as HTMLButtonElement | null;
+    if (linkstatsButton?.dataset.hasLink) {
+      linkstatsButton.addEventListener("click", async () => {
+        linkstatsButton.disabled = true;
+        const label = linkstatsButton.textContent;
+        linkstatsButton.textContent = "Pulling…";
+        try {
+          const response = await fetch(`/api/requests/${requestId}/pull-report`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ mode: "linkstats" })
+          });
+          const data = await response.json();
+          if (!response.ok) {
+            renderWarnings(linkstatsWarnings, [data?.error ?? "Pull failed."]);
+            return;
+          }
+          linkTotal.value = String(data.total_clicks ?? 0);
+          linkHuman.value = String(data.human_clicks ?? 0);
+          linkStatsJson.value = JSON.stringify(data);
+          linkstatsSource.textContent = sourceLabel(data.source ?? "manual");
+          renderLinkstatsPreview();
+          renderWarnings(linkstatsWarnings, [data.warning].filter(Boolean));
+          saveState();
+        } catch {
+          renderWarnings(linkstatsWarnings, ["Pull failed — check the connection and try again."]);
+        } finally {
+          linkstatsButton.disabled = false;
+          if (linkstatsButton.textContent === "Pulling…") linkstatsButton.textContent = label;
+        }
+      });
+    }
+
     // --- Fetch REALTOR.ca stats ----------------------------------------------
     const realtorButton = document.getElementById("fetch-realtor") as HTMLButtonElement | null;
     const realtorWarnings = document.getElementById("realtor-warnings") as HTMLElement | null;
@@ -811,12 +937,12 @@ const title = request ? `Report builder — ${request.listing_address}` : "Reque
     form.addEventListener("submit", (event) => {
       if (!heroInput.value) {
         event.preventDefault();
-        alert("Pick a HERO photo in section 03 first.");
+        alert("Pick a HERO photo in section 04 first.");
         return;
       }
       if (galleryIds.length !== 6) {
         event.preventDefault();
-        alert(`Pick exactly 6 gallery photos in section 03 (currently ${galleryIds.length}).`);
+        alert(`Pick exactly 6 gallery photos in section 04 (currently ${galleryIds.length}).`);
         return;
       }
       // Deliberately do NOT clear sessionStorage here: a server-side 400 (missing
@@ -843,6 +969,13 @@ const title = request ? `Report builder — ${request.listing_address}` : "Reque
     font-size: 0.76rem;
     font-weight: 500;
     line-height: 1.5;
+  }
+
+  .hint-line {
+    margin: 0;
+    color: var(--ss-muted);
+    font-size: 0.82rem;
+    font-weight: 500;
   }
 
   /* Upload slots (previews, realtor) */
