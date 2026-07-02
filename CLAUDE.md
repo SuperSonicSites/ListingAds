@@ -96,7 +96,7 @@ per `.env.example`. If Cloudflare Access fronts the app, exclude `/intake/*`,
 1. Brokerage's FB Page partner-shared to Supersonic BM, assigned to the system
    user with **Create content** permission (View is not enough to publish).
 2. Brokerage's ad account shared + assigned with at least **View performance**
-   (covers /campaigns, /insights, /ads, /previews).
+   (covers /campaigns, /insights, /ads + creative).
 3. Meta app has Marketing API **Standard Access**.
 4. Re-mint the system-user token after new asset grants if per-asset scoped.
 5. Record `meta_page_id` + `meta_ad_account_id` (digits only) on the brokerage.

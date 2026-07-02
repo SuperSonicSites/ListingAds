@@ -56,6 +56,16 @@ const campaignTypeLabel = snapshot
     : "New campaign"
   : "";
 
+// Sample Overview — guard `ad_sample` (older snapshots predate the field). Each
+// of the two sample sheets (mobile/desktop) renders EITHER a manual Ads Manager
+// screenshot override, or the native Facebook-style mockup when the ad_sample
+// has any text or photos; otherwise the sheet is omitted.
+const adSample = snapshot?.ad_sample ?? { text: "", images: [] };
+const adSampleImages = adSample.images.filter(Boolean);
+const hasAdSample = Boolean(adSample.text.trim()) || adSampleImages.length > 0;
+const showMobileSample = Boolean(snapshot?.images.ad_preview_mobile) || hasAdSample;
+const showDesktopSample = Boolean(snapshot?.images.ad_preview_desktop) || hasAdSample;
+
 const hexColor = (value: string | undefined, fallback: string) =>
   value && /^#[0-9a-fA-F]{6}$/.test(value) ? value : fallback;
 
@@ -243,7 +253,7 @@ const Icon = ({ name, size = 18 }: IconProps) =>
         </section>
 
         <!-- p3 · SAMPLE OVERVIEW — MOBILE -->
-        {snapshot.images.ad_preview_mobile && (
+        {showMobileSample && (
           <section class="report-sheet">
             <header class="report-section-heading">
               <span>02</span>
@@ -252,15 +262,46 @@ const Icon = ({ name, size = 18 }: IconProps) =>
                 <h2>Mobile feed</h2>
               </div>
             </header>
-            <div class="exr-contain-panel">
-              <img src={snapshot.images.ad_preview_mobile} alt="Mobile feed ad preview" />
-            </div>
+            {snapshot.images.ad_preview_mobile ? (
+              <div class="exr-contain-panel">
+                <img src={snapshot.images.ad_preview_mobile} alt="Mobile feed ad preview" />
+              </div>
+            ) : (
+              <div class="exr-sample-frame exr-sample-mobile">
+                <article class="exr-fb-card">
+                  <div class="exr-fb-head">
+                    {snapshot.brokerage.logo_url ? (
+                      <img class="exr-fb-avatar" src={snapshot.brokerage.logo_url} alt={snapshot.brokerage.name} />
+                    ) : (
+                      <span class="exr-fb-avatar exr-fb-avatar-fallback">{snapshot.brokerage.name.slice(0, 1)}</span>
+                    )}
+                    <div>
+                      <div class="exr-fb-name">{snapshot.brokerage.name}</div>
+                      <div class="exr-fb-sub">Sponsored · 🌐</div>
+                    </div>
+                  </div>
+                  {adSample.text && <div class="exr-fb-text">{adSample.text}</div>}
+                  {adSampleImages.length > 0 && (
+                    <div class:list={["exr-fb-grid", { odd: adSampleImages.length % 2 === 1 }]}>
+                      {adSampleImages.map((image, index) => (
+                        <img src={image} alt={`Ad photo ${index + 1}`} />
+                      ))}
+                    </div>
+                  )}
+                  <div class="exr-fb-actions">
+                    <span>👍 Like</span>
+                    <span>💬 Comment</span>
+                    <span>↗ Share</span>
+                  </div>
+                </article>
+              </div>
+            )}
             <p class="exr-caption">How your ad appeared in the Facebook &amp; Instagram mobile feed.</p>
           </section>
         )}
 
         <!-- p4 · SAMPLE OVERVIEW — DESKTOP -->
-        {snapshot.images.ad_preview_desktop && (
+        {showDesktopSample && (
           <section class="report-sheet">
             <header class="report-section-heading">
               <span>02</span>
@@ -269,9 +310,40 @@ const Icon = ({ name, size = 18 }: IconProps) =>
                 <h2>Desktop feed</h2>
               </div>
             </header>
-            <div class="exr-contain-panel">
-              <img src={snapshot.images.ad_preview_desktop} alt="Desktop feed ad preview" />
-            </div>
+            {snapshot.images.ad_preview_desktop ? (
+              <div class="exr-contain-panel">
+                <img src={snapshot.images.ad_preview_desktop} alt="Desktop feed ad preview" />
+              </div>
+            ) : (
+              <div class="exr-sample-frame exr-sample-desktop">
+                <article class="exr-fb-card">
+                  <div class="exr-fb-head">
+                    {snapshot.brokerage.logo_url ? (
+                      <img class="exr-fb-avatar" src={snapshot.brokerage.logo_url} alt={snapshot.brokerage.name} />
+                    ) : (
+                      <span class="exr-fb-avatar exr-fb-avatar-fallback">{snapshot.brokerage.name.slice(0, 1)}</span>
+                    )}
+                    <div>
+                      <div class="exr-fb-name">{snapshot.brokerage.name}</div>
+                      <div class="exr-fb-sub">Sponsored · 🌐</div>
+                    </div>
+                  </div>
+                  {adSample.text && <div class="exr-fb-text">{adSample.text}</div>}
+                  {adSampleImages.length > 0 && (
+                    <div class:list={["exr-fb-grid", { odd: adSampleImages.length % 2 === 1 }]}>
+                      {adSampleImages.map((image, index) => (
+                        <img src={image} alt={`Ad photo ${index + 1}`} />
+                      ))}
+                    </div>
+                  )}
+                  <div class="exr-fb-actions">
+                    <span>👍 Like</span>
+                    <span>💬 Comment</span>
+                    <span>↗ Share</span>
+                  </div>
+                </article>
+              </div>
+            )}
             <p class="exr-caption">How your ad appeared in the Facebook &amp; Instagram desktop feed.</p>
           </section>
         )}
@@ -549,6 +621,117 @@ const Icon = ({ name, size = 18 }: IconProps) =>
     margin: 0;
     color: var(--muted, #837c6f);
     font-size: 0.86rem;
+    font-weight: 600;
+    text-align: center;
+  }
+
+  /* Native Facebook-style ad-sample mockup (reuses the post-editor fb-card
+     visual language). The frame centers the card and caps its width per feed. */
+  .exr-sample-frame {
+    display: flex;
+    align-items: flex-start;
+    justify-content: center;
+    overflow: hidden;
+    border-radius: 12px;
+    background: var(--surface, #f6f5f1);
+    padding: 20px 16px;
+  }
+
+  .exr-sample-mobile .exr-fb-card {
+    width: 3.4in;
+  }
+
+  .exr-sample-desktop .exr-fb-card {
+    width: 5.6in;
+  }
+
+  .exr-fb-card {
+    max-width: 100%;
+    overflow: hidden;
+    border: 1px solid #dadde1;
+    border-radius: 10px;
+    background: #ffffff;
+  }
+
+  .exr-fb-head {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 12px 14px;
+  }
+
+  .exr-fb-avatar {
+    width: 40px;
+    height: 40px;
+    flex: 0 0 auto;
+    border-radius: 999px;
+    background: #101725;
+    object-fit: contain;
+    padding: 3px;
+  }
+
+  .exr-fb-avatar-fallback {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    color: #ffffff;
+    font-weight: 700;
+  }
+
+  .exr-fb-name {
+    color: #050505;
+    font-size: 0.9rem;
+    font-weight: 700;
+    line-height: 1.2;
+  }
+
+  .exr-fb-sub {
+    color: #65676b;
+    font-size: 0.76rem;
+  }
+
+  .exr-fb-text {
+    padding: 0 14px 12px;
+    color: #050505;
+    font-size: 0.9rem;
+    line-height: 1.45;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    display: -webkit-box;
+    -webkit-line-clamp: 12;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+
+  .exr-fb-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 2px;
+  }
+
+  .exr-fb-grid img {
+    display: block;
+    width: 100%;
+    aspect-ratio: 1 / 1;
+    object-fit: cover;
+    background: #f0f2f5;
+  }
+
+  .exr-fb-grid.odd img:first-child {
+    grid-column: 1 / -1;
+    aspect-ratio: 16 / 10;
+  }
+
+  .exr-fb-actions {
+    display: flex;
+    border-top: 1px solid #e4e6eb;
+  }
+
+  .exr-fb-actions span {
+    flex: 1;
+    padding: 9px 0;
+    color: #65676b;
+    font-size: 0.82rem;
     font-weight: 600;
     text-align: center;
   }

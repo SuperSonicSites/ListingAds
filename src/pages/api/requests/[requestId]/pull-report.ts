@@ -3,17 +3,18 @@ import { isAdmin } from "../../../../lib/auth";
 import { json } from "../../../../lib/http";
 import { readRequest } from "../../../../lib/storage";
 import {
-  captureAdPreviews,
+  fetchAdCreative,
   fetchCampaignInsights,
   fetchInsightsBreakdowns
 } from "../../../../lib/metaAds";
+import { captureRealtorStats } from "../../../../lib/realtorCapture";
 
 export const prerender = false;
 
 // Report-builder data pulls. Returns JSON that hydrates the form inputs only —
 // nothing here writes the snapshot (the freeze happens in snapshot.ts from the
-// reviewed, possibly-edited form values). mode=previews saves the captured
-// screenshots as request assets itself (via metaAds -> uploads).
+// reviewed, possibly-edited form values). mode=creative returns the ad's
+// caption + photo URLs (via the Marketing API) for the Sample Overview.
 
 export const POST: APIRoute = async ({ params, request }) => {
   if (!isAdmin(request)) {
@@ -52,13 +53,21 @@ export const POST: APIRoute = async ({ params, request }) => {
     return json(200, { insights, breakdowns });
   }
 
-  if (mode === "previews") {
+  if (mode === "creative") {
     if (!adRequest.fb_campaign_id) {
       return json(400, { error: "Record the Facebook Campaign ID on the request page first." });
     }
-    const result = await captureAdPreviews(adRequest.fb_campaign_id, requestId);
+    const result = await fetchAdCreative(adRequest.fb_campaign_id);
     return json(200, result);
   }
 
-  return json(400, { error: 'Unknown mode — use "stats" or "previews".' });
+  if (mode === "realtor") {
+    if (!adRequest.realtor_stats_link) {
+      return json(400, { error: "This request has no REALTOR.ca stats link. Upload the screenshots manually." });
+    }
+    const result = await captureRealtorStats(requestId, adRequest.realtor_stats_link);
+    return json(200, result);
+  }
+
+  return json(400, { error: 'Unknown mode — use "stats", "creative", or "realtor".' });
 };

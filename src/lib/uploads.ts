@@ -1,3 +1,4 @@
+import { Buffer } from "node:buffer";
 import { randomUUID } from "node:crypto";
 import { mkdir, readFile, rename, unlink, writeFile } from "node:fs/promises";
 import type { AdRequest, AssetEntry, AssetKind } from "./types";
@@ -119,6 +120,51 @@ export async function embedAsset(request: AdRequest, assetId: string | undefined
     const bytes = await readAssetBytes(request, entry);
     if (bytes.byteLength === 0 || bytes.byteLength > REPORT_IMAGE_MAX_BYTES) return "";
     return `data:${mimeForExt(entry.ext)};base64,${bytes.toString("base64")}`;
+  } catch {
+    return "";
+  }
+}
+
+const REMOTE_IMAGE_TIMEOUT_MS = 8000;
+
+// Only Meta CDN hosts may be fetched from an ad-creative URL — everything else is
+// an SSRF vector. Facebook/Instagram media URLs are signed and expire within days,
+// so the bytes must be frozen into the snapshot at freeze time (snapshot invariant).
+function allowedMediaHost(url: string): boolean {
+  try {
+    const host = new URL(url).hostname;
+    return (
+      host === "fbcdn.net" ||
+      host.endsWith(".fbcdn.net") ||
+      host === "cdninstagram.com" ||
+      host.endsWith(".cdninstagram.com")
+    );
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Fetch-and-freeze a remote CDN image (an fbcdn/cdninstagram ad-creative photo)
+ * as a base64 data URI. https + host-allowlist only; redirect:"error" so an
+ * allowlisted host can't bounce the fetch to an internal address; 8s timeout;
+ * image/* content-type; ≤ REPORT_IMAGE_MAX_BYTES. Returns "" on any failure so
+ * the report renders without the image, never with a broken one.
+ */
+export async function embedRemoteImage(url: string): Promise<string> {
+  if (!/^https:\/\//i.test(url)) return "";
+  if (!allowedMediaHost(url)) return "";
+  try {
+    const response = await fetch(url, {
+      signal: AbortSignal.timeout(REMOTE_IMAGE_TIMEOUT_MS),
+      redirect: "error"
+    });
+    if (!response.ok) return "";
+    const contentType = response.headers.get("content-type") ?? "";
+    if (!contentType.startsWith("image/")) return "";
+    const bytes = Buffer.from(await response.arrayBuffer());
+    if (bytes.byteLength === 0 || bytes.byteLength > REPORT_IMAGE_MAX_BYTES) return "";
+    return `data:${contentType};base64,${bytes.toString("base64")}`;
   } catch {
     return "";
   }

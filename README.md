@@ -23,8 +23,11 @@ Internal tool for managing listing ad campaigns end-to-end:
    with the exact task string.
 6. **Reporting** — the report builder pulls campaign insights (impressions,
    reach, all clicks) + region and age/gender breakdowns from the Marketing
-   API, captures mobile/desktop ad-preview screenshots, takes hero + 6 listing
-   photos and pasted REALTOR.ca 7/30/90-day screenshots, and freezes an
+   API, fetches the ad's caption + photos from the Marketing API for the
+   Facebook-style Sample Overview (falling back to the published post's text
+   and photos, or a manual Ads Manager screenshot), takes hero + 6 listing
+   photos and fetched REALTOR.ca 7/30/90-day screenshots (from the client's
+   share link, with manual upload as the fallback), and freezes an
    immutable snapshot rendered as the branded Executive Report (HTML → Letter
    PDF). "Send Executive Report" emails the PDF to the client ("Happy
    {weekday}!"), then the card auto-completes.
@@ -39,7 +42,7 @@ npm run dev            # http://127.0.0.1:4322
 
 Set `DEMO_MODE=1` to walk the whole workflow with mock integrations (no Meta /
 Resend / short.io credentials needed; emails are logged, not sent). PDF
-generation and preview capture use your local Chrome/Edge (`CHROME_PATH` to
+generation and REALTOR.ca capture use your local Chrome/Edge (`CHROME_PATH` to
 override).
 
 ## Deploy (Railway)
@@ -56,8 +59,6 @@ Business Manager checklist.
 
 ## Phase 2 (deliberately not built)
 
-- Automated REALTOR.ca 7/30/90-day stat capture (bot protection makes headless
-  capture unreliable; manual paste is the v1 flow).
 - Scheduled Meta publishing (`published=false` + `scheduled_publish_time`).
 - Campaign-ID dropdown from `GET /act_{id}/campaigns` (v1 is a text input).
 - Instagram cross-posting of the listing post.
@@ -66,5 +67,6 @@ Business Manager checklist.
 
 - `GRAPH_VERSION` (src/lib/metaCore.ts) is pinned to v21.0 — Graph versions live
   ~2 years; bump and re-test when Meta announces the sunset.
-- The ad-preview `ad_format` enum spellings and the short.io response field
-  names are verified-on-first-live-call items; each is isolated in its module.
+- The ad-creative story attachments shape (`media.image.src`, `subattachments`
+  for multi-photo posts) and the short.io response field names are
+  verified-on-first-live-call items; each is isolated in its module.

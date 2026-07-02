@@ -1,9 +1,5 @@
-import { Buffer } from "node:buffer";
-import puppeteer from "puppeteer-core";
-import type { AssetEntry, BreakdownRow, InsightsSource } from "./types";
-import { GRAPH, demoMode, fetchJson, metaToken } from "./metaCore";
-import { BROWSER_ARGS, browserPath } from "./browser";
-import { saveUpload } from "./uploads";
+import type { BreakdownRow, InsightsSource } from "./types";
+import { GRAPH, demoMode, fetchJson, getPageAccessToken, metaToken } from "./metaCore";
 
 // Marketing API reads for the Executive Report. The team creates the campaign
 // manually in Ads Manager; this module only reads it by the recorded Campaign
@@ -26,12 +22,18 @@ export type InsightsBreakdownsResult = {
   warning?: string;
 };
 
-export type AdPreviewsResult = {
-  source: InsightsSource;
-  mobile?: AssetEntry;
-  desktop?: AssetEntry;
-  warnings: string[];
+// The published ad's creative, read via the system token — the "Sample Overview"
+// caption + photos the report renders as a native Facebook-style mockup. Same
+// never-throws adapter contract: any failure degrades to "manual" + warning and
+// the builder's editable caption field stays the source of truth.
+export type AdCreativeResult = {
+  source: "meta_api" | "manual" | "mock";
+  text: string;
+  image_urls: string[];
+  warning?: string;
 };
+
+const MAX_SAMPLE_IMAGES = 4;
 
 function manualInsights(warning: string): CampaignInsightsResult {
   return { source: "manual", impressions: 0, reach: 0, clicks_all: 0, spend: 0, warning };
@@ -156,122 +158,125 @@ export async function fetchInsightsBreakdowns(
   }
 }
 
-// --- Ad preview screenshots ---------------------------------------------------
+// --- Ad creative (Sample Overview) --------------------------------------------
 
-// NOTE: enum spellings are the long-standing /previews values — if Meta renames
-// them the Graph error message lists the valid set; update here.
-const PREVIEW_FORMATS = [
-  { format: "MOBILE_FEED_STANDARD", kind: "ad_preview_mobile" as const, width: 375, height: 812, scale: 2 },
-  { format: "DESKTOP_FEED_STANDARD", kind: "ad_preview_desktop" as const, width: 1240, height: 900, scale: 1 }
-];
+// A 3-line sample listing caption for DEMO_MODE — mirrors the shape of a real
+// published post so the report mockup renders with representative text.
+const DEMO_SAMPLE_CAPTION =
+  "🚨 JUST LISTED!🚨 123 Sample Crescent\n💲 Offered at $749,900\n🛏️ 4 Bedrooms | 🛁 3 Bathrooms";
 
-function extractIframeSrc(html: string): string | undefined {
-  const match = html.match(/src="([^"]+)"/);
-  return match ? match[1].replaceAll("&amp;", "&") : undefined;
+function trimText(value: unknown): string {
+  return typeof value === "string" ? value.trim() : "";
 }
 
-function demoPreviewPage(label: string): string {
-  const html = `<!doctype html><html><body style="margin:0;display:grid;place-items:center;height:100vh;background:#f0f2f5;font-family:sans-serif;">
-    <div style="width:80%;max-width:420px;background:#fff;border:1px solid #dfe3ea;border-radius:10px;padding:28px;text-align:center;">
-      <div style="width:44px;height:44px;border-radius:50%;background:#1877f2;margin:0 auto 14px;"></div>
-      <strong style="font-size:17px;">Ad preview — ${label}</strong>
-      <p style="color:#65676b;font-size:13px;">DEMO_MODE placeholder. Live captures replace this screenshot.</p>
-      <div style="height:180px;border-radius:8px;background:linear-gradient(135deg,#dbe4ee,#c3d0de);margin-top:12px;"></div>
-    </div>
-  </body></html>`;
-  return `data:text/html,${encodeURIComponent(html)}`;
+// Pull image.src values out of a Graph attachments node, subattachments first
+// (multi-photo posts nest each photo there) capped at MAX_SAMPLE_IMAGES.
+function imagesFromAttachments(attachments: any): string[] {
+  const urls: string[] = [];
+  const node = attachments?.data?.[0];
+  const subs: any[] = Array.isArray(node?.subattachments?.data) ? node.subattachments.data : [];
+  for (const sub of subs) {
+    const src = trimText(sub?.media?.image?.src);
+    if (src) urls.push(src);
+  }
+  if (urls.length === 0) {
+    const src = trimText(node?.media?.image?.src);
+    if (src) urls.push(src);
+  }
+  return urls.slice(0, MAX_SAMPLE_IMAGES);
+}
+
+// (b) object_story_spec: an unpublished/inline creative spec. photo_data has a
+// single message/url; link_data a message + picture.
+function fromObjectStorySpec(spec: any): { text: string; image_urls: string[] } {
+  const photo = spec?.photo_data;
+  const link = spec?.link_data;
+  const text = trimText(photo?.message) || trimText(link?.message);
+  const image = trimText(photo?.url) || trimText(link?.picture);
+  return { text, image_urls: image ? [image] : [] };
+}
+
+function manualCreative(warning: string): AdCreativeResult {
+  return { source: "manual", text: "", image_urls: [], warning };
 }
 
 /**
- * Capture mobile + desktop preview screenshots for the campaign's first active
- * ad and store them as request assets. Preview iframe URLs are short-lived
- * signed URLs — they are screenshotted immediately and never persisted.
+ * Read the published ad's creative for the report's Sample Overview. Uses the
+ * system token to find the campaign's first ACTIVE ad (else the first ad), then
+ * resolves the creative in three fallbacks — the effective published story, an
+ * inline object_story_spec, or the creative's own body + image fields — taking
+ * whatever resolves first. Missing pieces degrade gracefully (empty text or []).
+ *
+ * NOTE (production): the story-fetch attachments shape (media.image.src, and
+ * subattachments for multi-photo posts) is the documented Graph structure but
+ * could only be exercised against DEMO_MODE here — verify field shapes against a
+ * real token before relying on multi-photo extraction.
  */
-export async function captureAdPreviews(campaignId: string, requestId: string): Promise<AdPreviewsResult> {
+export async function fetchAdCreative(campaignId: string): Promise<AdCreativeResult> {
   const token = metaToken();
-  const warnings: string[] = [];
-  const demo = !token && demoMode();
-
-  if (!token && !demo) {
-    return { source: "manual", warnings: ["Meta token is not configured. Upload preview screenshots manually."] };
+  if (!token) {
+    if (demoMode()) {
+      return { source: "mock", text: DEMO_SAMPLE_CAPTION, image_urls: [] };
+    }
+    return manualCreative(
+      "Ad creative auto-fetch unavailable. The report will use the published post text and photos instead."
+    );
   }
 
-  // Resolve the preview URLs first (cheap), then screenshot both in one browser.
-  const targets: { kind: (typeof PREVIEW_FORMATS)[number]["kind"]; url: string; width: number; height: number; scale: number }[] = [];
-
-  if (demo) {
-    for (const spec of PREVIEW_FORMATS) {
-      targets.push({ kind: spec.kind, url: demoPreviewPage(spec.format), width: spec.width, height: spec.height, scale: spec.scale });
-    }
-  } else {
-    let adId: string | undefined;
-    try {
-      const ads = await fetchJson(
-        `${GRAPH}/${campaignId}/ads?fields=id,name,effective_status&limit=25`,
-        token!
-      );
-      const list: any[] = Array.isArray(ads?.data) ? ads.data : [];
-      adId = (list.find((ad) => ad.effective_status === "ACTIVE") ?? list[0])?.id;
-    } catch (error) {
-      console.warn(`[metaAds] ads lookup failed for ${campaignId}:`, error);
-    }
-    if (!adId) {
-      return {
-        source: "manual",
-        warnings: ["No ads found under that campaign ID. Upload preview screenshots manually."]
-      };
-    }
-    for (const spec of PREVIEW_FORMATS) {
-      try {
-        const body = await fetchJson(`${GRAPH}/${adId}/previews?ad_format=${spec.format}`, token!);
-        const src = extractIframeSrc(String(body?.data?.[0]?.body ?? ""));
-        if (src) targets.push({ kind: spec.kind, url: src, width: spec.width, height: spec.height, scale: spec.scale });
-        else warnings.push(`No ${spec.format} preview returned. Upload that screenshot manually.`);
-      } catch (error) {
-        console.warn(`[metaAds] preview fetch failed (${spec.format}):`, error);
-        warnings.push(`${spec.format} preview unavailable. Upload that screenshot manually.`);
-      }
-    }
-  }
-
-  if (targets.length === 0) {
-    return { source: demo ? "mock" : "manual", warnings };
-  }
-
-  const executablePath = browserPath();
-  if (!executablePath) {
-    return {
-      source: "manual",
-      warnings: ["Preview capture needs Chrome, Edge, or CHROME_PATH set. Upload screenshots manually."]
-    };
-  }
-
-  const result: AdPreviewsResult = { source: demo ? "mock" : "meta_api", warnings };
-  let browser;
   try {
-    browser = await puppeteer.launch({ executablePath, headless: true, args: BROWSER_ARGS });
-    for (const target of targets) {
-      try {
-        const page = await browser.newPage();
-        await page.setViewport({ width: target.width, height: target.height, deviceScaleFactor: target.scale });
-        await page.goto(target.url, { waitUntil: "networkidle0", timeout: 30_000 });
-        await new Promise((resolve) => setTimeout(resolve, 1500)); // lazy images settle
-        const png = Buffer.from(await page.screenshot({ fullPage: true, type: "png" }));
-        await page.close();
-        const entry = await saveUpload(requestId, target.kind, png, `${target.kind}.png`);
-        if (target.kind === "ad_preview_mobile") result.mobile = entry;
-        else result.desktop = entry;
-      } catch (error) {
-        console.warn(`[metaAds] preview screenshot failed (${target.kind}):`, error);
-        warnings.push(`Could not capture the ${target.kind.replaceAll("_", " ")}. Upload it manually.`);
+    // First ACTIVE ad (else the first ad) under the campaign, with its creative.
+    const ads = await fetchJson(
+      `${GRAPH}/${campaignId}/ads?fields=id,effective_status,` +
+        `creative{effective_object_story_id,object_story_spec,image_url,thumbnail_url,body}&limit=25`,
+      token
+    );
+    const list: any[] = Array.isArray(ads?.data) ? ads.data : [];
+    const ad = list.find((entry) => entry.effective_status === "ACTIVE") ?? list[0];
+    const creative = ad?.creative;
+    if (!creative) {
+      return manualCreative(
+        "Ad creative auto-fetch unavailable. The report will use the published post text and photos instead."
+      );
+    }
+
+    // (a) The effective published story ("<pageId>_<postId>"). Reading a Page's
+    // own post needs a Page token minted from the system-user token.
+    const storyId = trimText(creative.effective_object_story_id);
+    if (storyId) {
+      const pageId = storyId.split("_")[0];
+      const pageToken = pageId ? await getPageAccessToken(pageId, token) : undefined;
+      if (pageToken) {
+        const story = await fetchJson(
+          `${GRAPH}/${storyId}?fields=message,full_picture,` +
+            `attachments{media,subattachments{media}}`,
+          pageToken
+        );
+        const text = trimText(story?.message);
+        let images = imagesFromAttachments(story?.attachments);
+        if (images.length === 0) {
+          const full = trimText(story?.full_picture);
+          if (full) images = [full];
+        }
+        if (text || images.length > 0) {
+          return { source: "meta_api", text, image_urls: images };
+        }
       }
     }
-  } catch (error) {
-    console.warn("[metaAds] preview browser launch failed:", error);
-    warnings.push("Preview capture failed to start a browser. Upload screenshots manually.");
-  } finally {
-    await browser?.close();
-  }
 
-  return result;
+    // (b) An inline object_story_spec (unpublished creative).
+    const fromSpec = fromObjectStorySpec(creative.object_story_spec);
+    if (fromSpec.text || fromSpec.image_urls.length > 0) {
+      return { source: "meta_api", text: fromSpec.text, image_urls: fromSpec.image_urls };
+    }
+
+    // (c) The creative's own body + image fields.
+    const body = trimText(creative.body);
+    const image = trimText(creative.image_url) || trimText(creative.thumbnail_url);
+    return { source: "meta_api", text: body, image_urls: image ? [image] : [] };
+  } catch (error) {
+    console.warn(`[metaAds] ad creative fetch failed for ${campaignId}:`, error);
+    return manualCreative(
+      "Ad creative auto-fetch unavailable. The report will use the published post text and photos instead."
+    );
+  }
 }

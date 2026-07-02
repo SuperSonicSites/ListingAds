@@ -186,12 +186,19 @@ export type ExecReportSnapshot = {
     age_gender: BreakdownRow[];
     warnings: string[];
   };
+  // Sample Overview — the ad caption + photos (fetched from the Marketing API or
+  // falling back to the published post), rendered as a native Facebook-style
+  // mockup. images are data URIs (max 4), embedded at freeze time.
+  ad_sample: {
+    text: string;
+    images: string[];
+  };
   images: {
     // ALL base64 data URIs, embedded at freeze time (snapshot invariant)
     hero: string;
     gallery: string[]; // exactly 6
-    ad_preview_mobile: string;
-    ad_preview_desktop: string;
+    ad_preview_mobile: string; // optional manual override screenshot ("" = use the mockup)
+    ad_preview_desktop: string; // optional manual override screenshot ("" = use the mockup)
     realtor_7: string; // "" if waived
     realtor_30: string;
     realtor_90: string;

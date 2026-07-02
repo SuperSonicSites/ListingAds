@@ -9,7 +9,7 @@ import {
   writeSnapshot
 } from "../../../../lib/storage";
 import { errorPage as sharedErrorPage, field, redirect } from "../../../../lib/http";
-import { embedAsset, findAsset } from "../../../../lib/uploads";
+import { embedAsset, embedRemoteImage, findAsset } from "../../../../lib/uploads";
 import { statusIndex } from "../../../../lib/status";
 import { sendAndLog } from "../../../../lib/email";
 import { reportReadyInternal } from "../../../../lib/emailTemplates";
@@ -133,11 +133,11 @@ export const POST: APIRoute = async ({ params, request }) => {
     return errorPage(400, "Pick exactly 6 gallery photos in section 03.", backHref);
   }
 
+  // Ad-preview screenshots are now OPTIONAL manual overrides — when present they
+  // replace the generated Facebook-style mockup on the mobile/desktop sample
+  // sheets; when absent the sheet renders the ad_sample mockup instead.
   const previewMobileId = singleAssetId(adRequest, "ad_preview_mobile");
   const previewDesktopId = singleAssetId(adRequest, "ad_preview_desktop");
-  if (!previewMobileId || !previewDesktopId) {
-    return errorPage(400, "Capture or upload both ad previews (mobile and desktop) in section 02.", backHref);
-  }
 
   const realtor7Id = singleAssetId(adRequest, "realtor_7");
   const realtor30Id = singleAssetId(adRequest, "realtor_30");
@@ -159,6 +159,23 @@ export const POST: APIRoute = async ({ params, request }) => {
   }
 
   const insightsScreens = adRequest.assets.filter((asset) => asset.kind === "insights_screenshot");
+
+  // Sample Overview: the reviewed caption (or the published post text as the
+  // manual-fallback) + up to 4 photos. Fetched fbcdn/cdninstagram URLs are
+  // frozen as data URIs; if none survive, the published post's own photos (up to
+  // 3, else the hero) are embedded from disk so the mockup is never empty.
+  const sampleText = (field(form, "ad_sample_text") || adRequest.post.final_text).slice(0, 5000);
+  const sampleImageUrls = field(form, "ad_sample_image_urls")
+    .split("\n")
+    .map((url) => url.trim())
+    .filter(Boolean)
+    .slice(0, 4);
+  let sampleImages = (await Promise.all(sampleImageUrls.map((url) => embedRemoteImage(url)))).filter(Boolean);
+  if (sampleImages.length === 0) {
+    const fallbackIds =
+      adRequest.post.photo_ids.length > 0 ? adRequest.post.photo_ids.slice(0, 3) : [heroId];
+    sampleImages = (await Promise.all(fallbackIds.map((id) => embedAsset(adRequest, id)))).filter(Boolean);
+  }
 
   const snapshot: ExecReportSnapshot = {
     request_id: adRequest.id,
@@ -200,11 +217,15 @@ export const POST: APIRoute = async ({ params, request }) => {
       age_gender: parseBreakdownJson(field(form, "age_gender_json")),
       warnings: []
     },
+    ad_sample: {
+      text: sampleText,
+      images: sampleImages
+    },
     images: {
       hero: await embedAsset(adRequest, heroId),
       gallery: await Promise.all(galleryIds.map((id) => embedAsset(adRequest, id))),
-      ad_preview_mobile: await embedAsset(adRequest, previewMobileId),
-      ad_preview_desktop: await embedAsset(adRequest, previewDesktopId),
+      ad_preview_mobile: previewMobileId ? await embedAsset(adRequest, previewMobileId) : "",
+      ad_preview_desktop: previewDesktopId ? await embedAsset(adRequest, previewDesktopId) : "",
       realtor_7: await embedAsset(adRequest, realtor7Id),
       realtor_30: await embedAsset(adRequest, realtor30Id),
       realtor_90: await embedAsset(adRequest, realtor90Id),

@@ -34,12 +34,16 @@ const photoAssets = assets.filter((asset) =>
 );
 const previewMobile = single("ad_preview_mobile");
 const previewDesktop = single("ad_preview_desktop");
+const hasCampaignId = Boolean(request?.fb_campaign_id);
+const adSampleText = request?.post.final_text ?? "";
 const realtorSlots = [
   { kind: "realtor_7", label: "7 Day" },
   { kind: "realtor_30", label: "30 Day" },
   { kind: "realtor_90", label: "90 Day" }
 ].map((slot) => ({ ...slot, entry: single(slot.kind) }));
 const anyRealtorMissing = realtorSlots.some((slot) => !slot.entry);
+const anyRealtorCaptured = realtorSlots.some((slot) => slot.entry);
+const realtorStatsLink = request?.realtor_stats_link ?? "";
 const insightsShots = assets.filter((asset) => asset.kind === "insights_screenshot");
 
 const earlyStatus =
@@ -98,6 +102,7 @@ const title = request ? `Report builder — ${request.listing_address}` : "Reque
         <input type="hidden" name="age_gender_json" id="age_gender_json" value="" />
         <input type="hidden" name="hero_id" id="hero_id" value="" />
         <input type="hidden" name="gallery_ids" id="gallery_ids" value="" />
+        <input type="hidden" name="ad_sample_image_urls" id="ad_sample_image_urls" value="" />
 
         <!-- 01 · Ad stats -->
         <section class="client-form-card">
@@ -168,15 +173,15 @@ const title = request ? `Report builder — ${request.listing_address}` : "Reque
           </div>
         </section>
 
-        <!-- 02 · Ad previews -->
+        <!-- 02 · Ad sample -->
         <section class="client-form-card">
           <header class="client-section-header">
             <span>02</span>
             <div>
-              <h2>Ad previews</h2>
+              <h2>Ad sample</h2>
               <p>
-                Screenshots of the live ad in the mobile and desktop feeds. Capture them from Meta, or
-                upload your own — a manual upload simply replaces the captured one.
+                The caption + photos that render as the Facebook-style ad sample in the report. Fetch them
+                from Meta via the campaign's system-token access, or edit them by hand.
               </p>
             </div>
           </header>
@@ -185,40 +190,68 @@ const title = request ? `Report builder — ${request.listing_address}` : "Reque
               <div class="client-pull-status">
                 <span></span>
                 <div>
-                  <strong>Feed preview capture</strong>
-                  <small>Screenshots the campaign's first active ad in both formats.</small>
+                  <strong>Ad creative</strong>
+                  <small>
+                    Source: <span class="source-badge" id="creative-source">Manual</span>
+                  </small>
                 </div>
               </div>
-              <button type="button" class="client-pull-button" id="capture-previews">
-                {previewMobile || previewDesktop ? "Re-capture previews" : "Capture previews"}
+              <button
+                type="button"
+                class="client-pull-button"
+                id="fetch-creative"
+                data-has-campaign={hasCampaignId ? "1" : ""}
+                disabled={!hasCampaignId}
+              >
+                Fetch ad creative from Meta
               </button>
             </div>
-            <div id="preview-warnings"></div>
+            {!hasCampaignId && (
+              <p class="import-fetch-notice">
+                Record the Facebook Campaign ID on the request page to fetch the ad creative automatically.
+              </p>
+            )}
+            <div id="creative-warnings"></div>
+
+            <label class="client-field wide">
+              <span>Ad caption</span>
+              <textarea name="ad_sample_text" id="ad-sample-text" rows="8" maxlength="5000">{adSampleText}</textarea>
+              <small class="field-note">
+                This caption + photos render as the Facebook-style ad sample in the report. If nothing is
+                fetched, the published post's text and photos are used.
+              </small>
+            </label>
+
+            <div class="creative-thumbs-block">
+              <strong>Fetched photos</strong>
+              <div class="creative-thumbs" id="creative-thumbs"></div>
+              <p class="creative-thumbs-empty" id="creative-thumbs-empty">
+                No photos fetched — the published post's photos are used.
+              </p>
+            </div>
 
             <div class="preview-grid">
               <div class="upload-slot">
-                <strong>Mobile feed</strong>
+                <strong>Mobile screenshot (optional)</strong>
                 {previewMobile ? (
-                  <img class="slot-thumb slot-thumb-tall" data-preview-thumb="ad_preview_mobile" src={assetUrl(previewMobile)} alt="Mobile ad preview" />
+                  <img class="slot-thumb slot-thumb-tall" src={assetUrl(previewMobile)} alt="Mobile ad screenshot" />
                 ) : (
-                  <div class="slot-empty" data-preview-empty="ad_preview_mobile">No capture yet</div>
+                  <div class="slot-empty">No screenshot</div>
                 )}
-                <img class="slot-thumb slot-thumb-tall" data-preview-thumb-new="ad_preview_mobile" alt="Mobile ad preview" hidden />
                 <label class="slot-file">
-                  Upload manually
+                  A real Ads Manager screenshot replaces the generated mockup page.
                   <input type="file" accept="image/jpeg,image/png,image/webp" data-upload-kind="ad_preview_mobile" />
                 </label>
               </div>
               <div class="upload-slot">
-                <strong>Desktop feed</strong>
+                <strong>Desktop screenshot (optional)</strong>
                 {previewDesktop ? (
-                  <img class="slot-thumb slot-thumb-tall" data-preview-thumb="ad_preview_desktop" src={assetUrl(previewDesktop)} alt="Desktop ad preview" />
+                  <img class="slot-thumb slot-thumb-tall" src={assetUrl(previewDesktop)} alt="Desktop ad screenshot" />
                 ) : (
-                  <div class="slot-empty" data-preview-empty="ad_preview_desktop">No capture yet</div>
+                  <div class="slot-empty">No screenshot</div>
                 )}
-                <img class="slot-thumb slot-thumb-tall" data-preview-thumb-new="ad_preview_desktop" alt="Desktop ad preview" hidden />
                 <label class="slot-file">
-                  Upload manually
+                  A real Ads Manager screenshot replaces the generated mockup page.
                   <input type="file" accept="image/jpeg,image/png,image/webp" data-upload-kind="ad_preview_desktop" />
                 </label>
               </div>
@@ -270,12 +303,36 @@ const title = request ? `Report builder — ${request.listing_address}` : "Reque
             <div>
               <h2>REALTOR.ca stats</h2>
               <p>
-                Screenshot the 7 / 30 / 90 day views from the REALTOR.ca listing stats (Win+Shift+S, then
-                paste). Automated Realtor.ca capture is planned (phase 2).
+                Fetch grabs the 7 / 30 / 90-day graphs from the client's share link; upload manually if it
+                fails.
               </p>
             </div>
           </header>
           <div class="client-review-area">
+            <div class="client-pull-strip">
+              <div class="client-pull-status">
+                <span></span>
+                <div>
+                  <strong>REALTOR.ca listing stats</strong>
+                  <small>
+                    {realtorStatsLink
+                      ? "Screenshots the 7 / 30 / 90-day graphs from the client's share link."
+                      : "No REALTOR.ca stats link on this request."}
+                  </small>
+                </div>
+              </div>
+              <button
+                type="button"
+                class="client-pull-button"
+                id="fetch-realtor"
+                data-has-link={realtorStatsLink ? "1" : ""}
+                disabled={!realtorStatsLink}
+              >
+                {anyRealtorCaptured ? "Re-fetch from REALTOR.ca" : "Fetch from REALTOR.ca"}
+              </button>
+            </div>
+            <div id="realtor-warnings"></div>
+
             <div class="preview-grid realtor-grid">
               {realtorSlots.map((slot) => (
                 <div class="upload-slot">
@@ -285,11 +342,8 @@ const title = request ? `Report builder — ${request.listing_address}` : "Reque
                   ) : (
                     <div class="slot-empty">No screenshot yet</div>
                   )}
-                  <button type="button" class="button secondary sm paste-target" data-paste-kind={slot.kind}>
-                    Click, then Ctrl+V
-                  </button>
                   <label class="slot-file">
-                    Or upload a file
+                    Upload manually
                     <input type="file" accept="image/jpeg,image/png,image/webp" data-upload-kind={slot.kind} />
                   </label>
                 </div>
@@ -305,11 +359,8 @@ const title = request ? `Report builder — ${request.listing_address}` : "Reque
                   ))}
                 </div>
               )}
-              <button type="button" class="button secondary sm paste-target" data-paste-kind="insights_screenshot">
-                Click, then Ctrl+V
-              </button>
               <label class="slot-file">
-                Or upload files
+                Upload files
                 <input type="file" accept="image/jpeg,image/png,image/webp" data-upload-kind="insights_screenshot" multiple />
               </label>
             </div>
@@ -408,7 +459,12 @@ const title = request ? `Report builder — ${request.listing_address}` : "Reque
     const galleryInput = document.getElementById("gallery_ids") as HTMLInputElement;
     const sourceBadge = document.getElementById("stats-source") as HTMLElement;
     const statsWarnings = document.getElementById("stats-warnings") as HTMLElement;
-    const previewWarnings = document.getElementById("preview-warnings") as HTMLElement;
+    const creativeWarnings = document.getElementById("creative-warnings") as HTMLElement;
+    const adSampleText = document.getElementById("ad-sample-text") as HTMLTextAreaElement;
+    const adSampleUrls = document.getElementById("ad_sample_image_urls") as HTMLInputElement;
+    const creativeSource = document.getElementById("creative-source") as HTMLElement;
+    const creativeThumbs = document.getElementById("creative-thumbs") as HTMLElement;
+    const creativeThumbsEmpty = document.getElementById("creative-thumbs-empty") as HTMLElement;
     const pickSummary = document.getElementById("pick-summary") as HTMLElement;
     const regionTable = document.querySelector('[data-table="region"]') as HTMLElement;
     const ageTable = document.querySelector('[data-table="age"]') as HTMLElement;
@@ -426,6 +482,24 @@ const title = request ? `Report builder — ${request.listing_address}` : "Reque
         p.textContent = warning;
         container.appendChild(p);
       }
+    }
+
+    // --- Ad sample photo thumbnails (from the hidden newline-joined URLs) ---
+    function renderCreativeThumbs() {
+      const urls = adSampleUrls.value
+        .split("\n")
+        .map((url) => url.trim())
+        .filter(Boolean);
+      creativeThumbs.innerHTML = "";
+      for (const url of urls) {
+        const img = document.createElement("img");
+        img.src = url;
+        img.alt = "Ad photo";
+        img.loading = "lazy";
+        img.referrerPolicy = "no-referrer";
+        creativeThumbs.appendChild(img);
+      }
+      creativeThumbsEmpty.hidden = urls.length > 0;
     }
 
     // --- Breakdown tables -------------------------------------------------
@@ -546,6 +620,9 @@ const title = request ? `Report builder — ${request.listing_address}` : "Reque
         age: readRows(ageTable),
         hero: heroId,
         gallery: galleryIds,
+        ad_sample_text: adSampleText.value,
+        ad_sample_image_urls: adSampleUrls.value,
+        creative_badge: creativeSource.textContent,
         fields: {} as Record<string, string>
       };
       for (const name of ["prepared_by", "website", "brokerage_address", "contact_line"]) {
@@ -576,6 +653,12 @@ const title = request ? `Report builder — ${request.listing_address}` : "Reque
         if (state.badge) sourceBadge.textContent = state.badge;
         if (Array.isArray(state.region)) setRows(regionTable, state.region);
         if (Array.isArray(state.age)) setRows(ageTable, state.age);
+        if (typeof state.ad_sample_text === "string") adSampleText.value = state.ad_sample_text;
+        if (typeof state.ad_sample_image_urls === "string") {
+          adSampleUrls.value = state.ad_sample_image_urls;
+          renderCreativeThumbs();
+        }
+        if (state.creative_badge) creativeSource.textContent = state.creative_badge;
         const validIds = new Set(picks.map((pick) => pick.dataset.assetId ?? ""));
         if (typeof state.hero === "string" && validIds.has(state.hero)) heroId = state.hero;
         if (Array.isArray(state.gallery)) {
@@ -650,8 +733,9 @@ const title = request ? `Report builder — ${request.listing_address}` : "Reque
       });
     });
 
-    // Paste routing: clipboard images land in the slot whose paste target was
-    // clicked last (Win+Shift+S → click a slot → Ctrl+V).
+    // Paste routing: clipboard images land in the target armed by the last
+    // click. Only the gallery drop-zone uses this now (click it, then Ctrl+V);
+    // the REALTOR.ca slots fetch automatically or take a manual file upload.
     let pasteKind = "";
     const pasteTargets = Array.from(document.querySelectorAll("[data-paste-kind]")) as HTMLElement[];
     function armPasteTarget(target: HTMLElement) {
@@ -735,50 +819,82 @@ const title = request ? `Report builder — ${request.listing_address}` : "Reque
       }
     });
 
-    // --- Capture previews ----------------------------------------------------
-    const captureButton = document.getElementById("capture-previews") as HTMLButtonElement | null;
-    captureButton?.addEventListener("click", async () => {
-      captureButton.disabled = true;
-      const label = captureButton.textContent;
-      captureButton.textContent = "Capturing… (up to a minute)";
-      try {
-        const response = await fetch(`/api/requests/${requestId}/pull-report`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ mode: "previews" })
-        });
-        const data = await response.json();
-        if (!response.ok) {
-          renderWarnings(previewWarnings, [data?.error ?? "Capture failed."]);
-          return;
-        }
-        renderWarnings(previewWarnings, Array.isArray(data.warnings) ? data.warnings : []);
-        for (const [slot, entry] of [
-          ["ad_preview_mobile", data.mobile],
-          ["ad_preview_desktop", data.desktop]
-        ] as const) {
-          if (!entry?.id) continue;
-          const src = `/api/uploads/${requestId}/${entry.id}?v=${Date.now()}`;
-          const existing = document.querySelector(`[data-preview-thumb="${slot}"]`) as HTMLImageElement | null;
-          const fresh = document.querySelector(`[data-preview-thumb-new="${slot}"]`) as HTMLImageElement | null;
-          const empty = document.querySelector(`[data-preview-empty="${slot}"]`) as HTMLElement | null;
-          if (existing) {
-            existing.src = src;
-          } else if (fresh) {
-            fresh.src = src;
-            fresh.hidden = false;
-            if (empty) empty.hidden = true;
+    // --- Fetch ad creative (Sample Overview) --------------------------------
+    const fetchCreativeButton = document.getElementById("fetch-creative") as HTMLButtonElement | null;
+    if (fetchCreativeButton?.dataset.hasCampaign) {
+      fetchCreativeButton.addEventListener("click", async () => {
+        fetchCreativeButton.disabled = true;
+        const label = fetchCreativeButton.textContent;
+        fetchCreativeButton.textContent = "Fetching…";
+        try {
+          const response = await fetch(`/api/requests/${requestId}/pull-report`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ mode: "creative" })
+          });
+          const data = await response.json();
+          if (!response.ok) {
+            renderWarnings(creativeWarnings, [data?.error ?? "Fetch failed."]);
+            return;
           }
+          if (typeof data.text === "string" && data.text.trim()) {
+            adSampleText.value = data.text;
+          }
+          const urls: string[] = Array.isArray(data.image_urls) ? data.image_urls.filter(Boolean) : [];
+          adSampleUrls.value = urls.join("\n");
+          renderCreativeThumbs();
+          creativeSource.textContent = sourceLabel(data.source ?? "manual");
+          renderWarnings(creativeWarnings, [data.warning].filter(Boolean));
+          saveState();
+        } catch {
+          renderWarnings(creativeWarnings, ["Fetch failed — check the connection and try again."]);
+        } finally {
+          fetchCreativeButton.disabled = false;
+          fetchCreativeButton.textContent = label;
         }
-        captureButton.textContent = "Re-capture previews";
-        return;
-      } catch {
-        renderWarnings(previewWarnings, ["Capture failed — check the connection and try again."]);
-      } finally {
-        captureButton.disabled = false;
-        if (captureButton.textContent?.startsWith("Capturing")) captureButton.textContent = label;
-      }
-    });
+      });
+    }
+
+    // --- Fetch REALTOR.ca stats ----------------------------------------------
+    const realtorButton = document.getElementById("fetch-realtor") as HTMLButtonElement | null;
+    const realtorWarnings = document.getElementById("realtor-warnings") as HTMLElement | null;
+    if (realtorButton?.dataset.hasLink) {
+      realtorButton.addEventListener("click", async () => {
+        realtorButton.disabled = true;
+        const label = realtorButton.textContent;
+        realtorButton.textContent = "Fetching…";
+        try {
+          const response = await fetch(`/api/requests/${requestId}/pull-report`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ mode: "realtor" })
+          });
+          const data = await response.json();
+          if (!response.ok) {
+            if (realtorWarnings) renderWarnings(realtorWarnings, [data?.error ?? "Fetch failed."]);
+            return;
+          }
+          const captured: string[] = Array.isArray(data.captured) ? data.captured : [];
+          if (captured.length > 0) {
+            // New thumbnails only render after a reload — persist state first
+            // (same pattern as uploadFiles) so the builder picks up where it was.
+            saveState();
+            location.reload();
+            return;
+          }
+          // Nothing captured: show the warnings in place, no reload.
+          const warnings: string[] = Array.isArray(data.warnings) ? data.warnings : [];
+          if (realtorWarnings) {
+            renderWarnings(realtorWarnings, warnings.length ? warnings : ["No stats were captured. Upload the screenshots manually."]);
+          }
+        } catch {
+          if (realtorWarnings) renderWarnings(realtorWarnings, ["Fetch failed — check the connection and try again."]);
+        } finally {
+          realtorButton.disabled = false;
+          if (realtorButton.textContent === "Fetching…") realtorButton.textContent = label;
+        }
+      });
+    }
 
     // --- Submit ---------------------------------------------------------------
     form.addEventListener("submit", (event) => {
@@ -803,6 +919,7 @@ const title = request ? `Report builder — ${request.listing_address}` : "Reque
 
     // Boot: restore any in-progress state, then paint the picks.
     restoreState();
+    renderCreativeThumbs();
     applyPicks();
   }
 </script>
@@ -966,10 +1083,47 @@ const title = request ? `Report builder — ${request.listing_address}` : "Reque
     font-size: 0.8rem;
   }
 
-  .paste-target.is-armed {
-    border-color: var(--ss-accent);
-    color: var(--ss-accent-ink);
-    box-shadow: 0 0 0 3px var(--ss-accent-soft);
+  /* Ad sample fetched-photo thumbnails */
+  .creative-thumbs-block {
+    display: grid;
+    gap: 8px;
+  }
+
+  .creative-thumbs-block > strong {
+    color: var(--ss-ink);
+    font-size: 0.84rem;
+    font-weight: 700;
+  }
+
+  .creative-thumbs {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(96px, 1fr));
+    gap: 10px;
+  }
+
+  .creative-thumbs:empty {
+    display: none;
+  }
+
+  .creative-thumbs img {
+    display: block;
+    width: 100%;
+    aspect-ratio: 1 / 1;
+    object-fit: cover;
+    border: 1px solid var(--ss-border);
+    border-radius: var(--ss-radius-sm);
+    background: #ffffff;
+  }
+
+  .creative-thumbs-empty {
+    margin: 0;
+    color: var(--ss-muted);
+    font-size: 0.8rem;
+    font-weight: 500;
+  }
+
+  .creative-thumbs-empty[hidden] {
+    display: none;
   }
 
   /* Photo picking */
