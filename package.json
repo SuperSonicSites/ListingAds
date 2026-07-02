@@ -10,7 +10,7 @@
     "dev": "astro dev --host 127.0.0.1",
     "build": "astro build",
     "preview": "node ./dist/server/entry.mjs",
-    "start": "node ./dist/server/entry.mjs"
+    "start": "node ./scripts/start.mjs"
   },
   "dependencies": {
     "@astrojs/node": "^11.0.0",
