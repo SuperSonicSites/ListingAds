@@ -106,6 +106,9 @@ export const POST: APIRoute = async ({ request }) => {
   }
 
   // Logo resolution order: uploaded file > pasted URL > (on edit) the existing logo.
+  // Whatever the source, the logo is STORED as a data URI — the intake header, the
+  // post-editor preview, and every frozen report must render it without a network
+  // fetch (a pasted URL that later dies or hangs would break PDFs forever).
   let logoUrl = field(form, "logo_url");
   if (logoUrl && !isHttpUrl(logoUrl)) {
     return errorPage(400, "Logo URL must be an http(s) link — or upload the image file instead.");
@@ -120,6 +123,21 @@ export const POST: APIRoute = async ({ request }) => {
     }
     const bytes = Buffer.from(await logoFile.arrayBuffer());
     logoUrl = `data:${logoFile.type};base64,${bytes.toString("base64")}`;
+  } else if (logoUrl) {
+    try {
+      const response = await fetch(logoUrl, { signal: AbortSignal.timeout(8000) });
+      const contentType = (response.headers.get("content-type") ?? "").split(";")[0].trim();
+      if (!response.ok || !LOGO_TYPES.has(contentType)) {
+        return errorPage(400, "That logo URL did not return a PNG, JPEG, SVG, or WebP image — upload the file instead.");
+      }
+      const bytes = Buffer.from(await response.arrayBuffer());
+      if (bytes.byteLength === 0 || bytes.byteLength > MAX_LOGO_BYTES) {
+        return errorPage(400, "The logo at that URL is too large — keep it under 1 MB, or upload a smaller file.");
+      }
+      logoUrl = `data:${contentType};base64,${bytes.toString("base64")}`;
+    } catch {
+      return errorPage(400, "Could not download the logo from that URL — upload the image file instead.");
+    }
   }
   if (!logoUrl && existing) {
     logoUrl = existing.logo_url;
