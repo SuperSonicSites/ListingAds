@@ -1,5 +1,6 @@
 import type { APIRoute } from "astro";
 import { isAdmin } from "../../../../lib/auth";
+import { errorPage as sharedErrorPage, field, redirect } from "../../../../lib/http";
 import { sendAndLog, type EmailPayload } from "../../../../lib/email";
 import {
   intakeConfirmation,
@@ -18,25 +19,12 @@ export const prerender = false;
 // email or corrected listing address flows into the retry. report_delivery is
 // the exception: it carries the PDF and must go through send-report.
 
-function field(form: FormData, name: string) {
-  return String(form.get(name) ?? "").trim();
-}
-
-function redirect(location: string) {
-  return new Response(null, { status: 303, headers: { Location: location } });
-}
-
 function errorPage(status: number, message: string, backHref?: string) {
   const back = backHref
     ? `<p><a href="${backHref}">Return to the request</a>, or use your browser's <strong>Back</strong> button.</p>`
     : `<p>Use your browser's <strong>Back</strong> button to return to the request.</p>`;
-  const html = `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Email not sent</title></head>
-<body style="font-family: system-ui, sans-serif; max-width: 32rem; margin: 4rem auto; padding: 0 1rem;">
-<h1 style="font-size:1.25rem;">Email not sent</h1>
-<p>${message}</p>
-${back}
-</body></html>`;
-  return new Response(html, { status, headers: { "Content-Type": "text/html; charset=utf-8" } });
+  return sharedErrorPage(status, "Email not sent", `<p>${message}</p>
+${back}`);
 }
 
 export const POST: APIRoute = async ({ params, request }) => {

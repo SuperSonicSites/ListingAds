@@ -1,5 +1,6 @@
 import type { APIRoute } from "astro";
 import { isAdmin } from "../../../../lib/auth";
+import { json } from "../../../../lib/http";
 import { readRequest } from "../../../../lib/storage";
 import {
   captureAdPreviews,
@@ -13,13 +14,6 @@ export const prerender = false;
 // nothing here writes the snapshot (the freeze happens in snapshot.ts from the
 // reviewed, possibly-edited form values). mode=previews saves the captured
 // screenshots as request assets itself (via metaAds -> uploads).
-
-function json(status: number, body: unknown): Response {
-  return new Response(JSON.stringify(body), {
-    status,
-    headers: { "Content-Type": "application/json" }
-  });
-}
 
 export const POST: APIRoute = async ({ params, request }) => {
   if (!isAdmin(request)) {

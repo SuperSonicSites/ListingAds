@@ -1,5 +1,6 @@
 import type { APIRoute } from "astro";
 import { isAdmin } from "../../../../lib/auth";
+import { errorPage as sharedErrorPage, field, isHttpUrl, redirect } from "../../../../lib/http";
 import { readBrokerage, readRequest, writeRequest } from "../../../../lib/storage";
 import { HEADLINE_FLAGS } from "../../../../lib/types";
 import { assembleCaption } from "../../../../lib/postFormat";
@@ -11,34 +12,12 @@ export const prerender = false;
 // for review (action=ready — the row-1 transition, guarded by transitions.ts),
 // or record a manually published post's URL (action=record_manual).
 
-function field(form: FormData, name: string) {
-  return String(form.get(name) ?? "").trim();
-}
-
-function redirect(location: string) {
-  return new Response(null, { status: 303, headers: { Location: location } });
-}
-
 function errorPage(status: number, message: string, backHref?: string) {
   const back = backHref
     ? `<p><a href="${backHref}">Back to the post editor</a> — or use your browser's <strong>Back</strong> button; your entries are preserved there.</p>`
     : `<p>Use your browser's <strong>Back</strong> button to return to the form — your entries are preserved there.</p>`;
-  const html = `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Post not saved</title></head>
-<body style="font-family: system-ui, sans-serif; max-width: 32rem; margin: 4rem auto; padding: 0 1rem;">
-<h1 style="font-size:1.25rem;">Post not saved</h1>
-<p>${message}</p>
-${back}
-</body></html>`;
-  return new Response(html, { status, headers: { "Content-Type": "text/html; charset=utf-8" } });
-}
-
-function isHttpUrl(value: string): boolean {
-  try {
-    const url = new URL(value);
-    return url.protocol === "http:" || url.protocol === "https:";
-  } catch {
-    return false;
-  }
+  return sharedErrorPage(status, "Post not saved", `<p>${message}</p>
+${back}`);
 }
 
 export const POST: APIRoute = async ({ params, request }) => {

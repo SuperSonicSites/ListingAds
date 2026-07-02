@@ -97,16 +97,6 @@ export async function saveUpload(
   return entry;
 }
 
-export async function deleteAsset(requestId: string, assetId: string): Promise<void> {
-  const request = await readRequest(requestId);
-  const entry = request.assets.find((asset) => asset.id === assetId);
-  if (!entry) return;
-  request.assets = request.assets.filter((asset) => asset.id !== assetId);
-  request.post.photo_ids = request.post.photo_ids.filter((id) => id !== assetId);
-  await writeRequest(request);
-  await unlink(assetPath(requestId, entry.id, entry.ext)).catch(() => {});
-}
-
 /** Resolve an asset through the manifest (unknown id -> undefined, never a path guess). */
 export function findAsset(request: AdRequest, assetId: string): AssetEntry | undefined {
   return request.assets.find((asset) => asset.id === assetId);

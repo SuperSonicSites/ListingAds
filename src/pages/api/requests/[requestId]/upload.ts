@@ -1,6 +1,7 @@
 import { Buffer } from "node:buffer";
 import type { APIRoute } from "astro";
 import { isAdmin } from "../../../../lib/auth";
+import { json } from "../../../../lib/http";
 import { readRequest } from "../../../../lib/storage";
 import { saveUpload } from "../../../../lib/uploads";
 import type { AssetEntry, AssetKind } from "../../../../lib/types";
@@ -13,13 +14,6 @@ export const prerender = false;
 // and get a 303 back (with ?warning= on failure); fetch() callers get JSON
 // { ok, assets, error? }. saveUpload() does the real validation (magic bytes,
 // size caps) and throws user-facing messages.
-
-function json(status: number, body: { ok: boolean; assets: AssetEntry[]; error?: string }) {
-  return new Response(JSON.stringify(body), {
-    status,
-    headers: { "Content-Type": "application/json; charset=utf-8" }
-  });
-}
 
 // Only ever bounce back to a same-origin path — never an absolute URL.
 function safeRedirectPath(value: string): string | undefined {

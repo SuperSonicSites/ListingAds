@@ -1,6 +1,7 @@
 import { Buffer } from "node:buffer";
 import type { APIRoute } from "astro";
 import { isAdmin } from "../../lib/auth";
+import { EMAIL_RE, errorPage as sharedErrorPage, field, isHttpUrl, redirect } from "../../lib/http";
 import {
   brokerageExists,
   createSecretToken,
@@ -15,26 +16,13 @@ export const prerender = false;
 
 const hex = /^#[0-9a-fA-F]{6}$/;
 const digits = /^[0-9]{1,32}$/;
-const emailish = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const emailish = EMAIL_RE;
 
 // Uploaded logos are stored as data URIs inside the brokerage JSON itself:
 // data/brokerages/ already lives on the persistent volume, and snapshot creation
 // passes data URIs through untouched, so frozen reports keep the logo bytes forever.
 const LOGO_TYPES = new Set(["image/png", "image/jpeg", "image/svg+xml", "image/webp"]);
 const MAX_LOGO_BYTES = 1_000_000;
-
-function field(form: FormData, name: string) {
-  return String(form.get(name) ?? "").trim();
-}
-
-function isHttpUrl(value: string) {
-  try {
-    const url = new URL(value);
-    return url.protocol === "http:" || url.protocol === "https:";
-  } catch {
-    return false;
-  }
-}
 
 // SSRF guard for the logo-URL fetch: refuse hosts that can reach the box itself
 // or the private network (incl. the cloud metadata endpoint at 169.254.169.254).
@@ -58,21 +46,13 @@ function isBlockedHost(hostname: string) {
   return false;
 }
 
-function redirect(location: string) {
-  return new Response(null, {
-    status: 303,
-    headers: { Location: location }
-  });
-}
-
 function errorPage(status: number, message: string) {
-  const html = `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Brokerage not saved</title></head>
-<body style="font-family: system-ui, sans-serif; max-width: 32rem; margin: 4rem auto; padding: 0 1rem;">
-<h1 style="font-size:1.25rem;">Brokerage not saved</h1>
-<p>${message}</p>
-<p>Use your browser's <strong>Back</strong> button to return to the form — your entries are preserved there.</p>
-</body></html>`;
-  return new Response(html, { status, headers: { "Content-Type": "text/html; charset=utf-8" } });
+  return sharedErrorPage(
+    status,
+    "Brokerage not saved",
+    `<p>${message}</p>
+<p>Use your browser's <strong>Back</strong> button to return to the form — your entries are preserved there.</p>`
+  );
 }
 
 export const POST: APIRoute = async ({ request }) => {

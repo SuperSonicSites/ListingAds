@@ -1,4 +1,5 @@
 import type { APIRoute } from "astro";
+import { errorPage as sharedErrorPage, field, isHttpUrl, redirect } from "../../lib/http";
 import { createRequestId, findBrokerageByToken, writeRequest } from "../../lib/storage";
 import { AD_BUDGETS, emptyPostDraft } from "../../lib/types";
 import type { AdBudget, AdRequest, CampaignType } from "../../lib/types";
@@ -21,39 +22,18 @@ const globalScope = globalThis as typeof globalThis & { __sarIntakeRate?: RateSt
 const rateStore: RateStore = globalScope.__sarIntakeRate ?? new Map();
 globalScope.__sarIntakeRate = rateStore;
 
-function field(form: FormData, name: string) {
-  return String(form.get(name) ?? "").trim();
-}
-
-function isHttpUrl(value: string) {
-  try {
-    const url = new URL(value);
-    return url.protocol === "http:" || url.protocol === "https:";
-  } catch {
-    return false;
-  }
-}
-
-function redirect(location: string) {
-  return new Response(null, {
-    status: 303,
-    headers: { Location: location }
-  });
-}
-
 // Form POSTs navigate the browser, so a bare text/plain 400 is a dead end. Entries are
 // only preserved via history back (bfcache) — a fresh GET of the form would be blank,
 // so the copy steers to the Back button and the link is a last resort. Messages are
 // static strings only — never echo client input into this HTML.
 function errorPage(status: number, message: string, backHref?: string) {
-  const html = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>Request not submitted</title></head>
-<body style="font-family: system-ui, sans-serif; max-width: 32rem; margin: 4rem auto; padding: 0 1rem;">
-<h1 style="font-size:1.25rem;">Request not submitted</h1>
-<p>${message}</p>
+  return sharedErrorPage(
+    status,
+    "Request not submitted",
+    `<p>${message}</p>
 <p>Use your browser's <strong>Back</strong> button to return to the form — your entries are preserved there.</p>
-${backHref ? `<p><a href="${backHref}">Or start over with a blank form</a>.</p>` : ""}
-</body></html>`;
-  return new Response(html, { status, headers: { "Content-Type": "text/html; charset=utf-8" } });
+${backHref ? `<p><a href="${backHref}">Or start over with a blank form</a>.</p>` : ""}`
+  );
 }
 
 export const POST: APIRoute = async ({ request }) => {

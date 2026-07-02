@@ -1,6 +1,7 @@
 import type { APIRoute } from "astro";
 import { isAdmin } from "../../../../lib/auth";
 import { addDays } from "../../../../lib/dates";
+import { ISO_DATE, errorPage as sharedErrorPage, field, redirect, validateCampaignId } from "../../../../lib/http";
 import { readRequest, writeRequest } from "../../../../lib/storage";
 
 export const prerender = false;
@@ -9,28 +10,12 @@ export const prerender = false;
 // report_due_date) WITHOUT transitioning. "Record Ad Launch" posts the same
 // form to /status with to=ad_published instead.
 
-const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
-const CAMPAIGN_ID = /^\d{5,25}$/;
-
-function field(form: FormData, name: string) {
-  return String(form.get(name) ?? "").trim();
-}
-
-function redirect(location: string) {
-  return new Response(null, { status: 303, headers: { Location: location } });
-}
-
 function errorPage(status: number, message: string, backHref?: string) {
   const back = backHref
     ? `<p><a href="${backHref}">Return to the request</a>, or use your browser's <strong>Back</strong> button — your entries are preserved there.</p>`
     : `<p>Use your browser's <strong>Back</strong> button to return to the form — your entries are preserved there.</p>`;
-  const html = `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Campaign not saved</title></head>
-<body style="font-family: system-ui, sans-serif; max-width: 32rem; margin: 4rem auto; padding: 0 1rem;">
-<h1 style="font-size:1.25rem;">Campaign not saved</h1>
-<p>${message}</p>
-${back}
-</body></html>`;
-  return new Response(html, { status, headers: { "Content-Type": "text/html; charset=utf-8" } });
+  return sharedErrorPage(status, "Campaign not saved", `<p>${message}</p>
+${back}`);
 }
 
 export const POST: APIRoute = async ({ params, request }) => {
@@ -52,18 +37,9 @@ export const POST: APIRoute = async ({ params, request }) => {
 
   const campaignId = field(form, "fb_campaign_id");
   const allowAny = field(form, "allow_any") === "on";
-  if (campaignId) {
-    if (allowAny) {
-      if (campaignId.length > 100) {
-        return errorPage(400, "Campaign ID must be 1–100 characters.", detailHref);
-      }
-    } else if (!CAMPAIGN_ID.test(campaignId)) {
-      return errorPage(
-        400,
-        "The Facebook Campaign ID should be 5–25 digits. Tick the non-standard ID override to save it anyway.",
-        detailHref
-      );
-    }
+  const campaignIdError = validateCampaignId(campaignId, allowAny, "save");
+  if (campaignIdError) {
+    return errorPage(400, campaignIdError, detailHref);
   }
 
   const launchDate = field(form, "ad_launch_date");

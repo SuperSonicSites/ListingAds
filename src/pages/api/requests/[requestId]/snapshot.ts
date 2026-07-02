@@ -8,6 +8,7 @@ import {
   writeRequest,
   writeSnapshot
 } from "../../../../lib/storage";
+import { errorPage as sharedErrorPage, field, redirect } from "../../../../lib/http";
 import { embedAsset, findAsset } from "../../../../lib/uploads";
 import { statusIndex } from "../../../../lib/status";
 import { sendAndLog } from "../../../../lib/email";
@@ -23,10 +24,6 @@ export const prerender = false;
 
 const MAX_BREAKDOWN_ROWS = 50;
 
-function field(form: FormData, name: string) {
-  return String(form.get(name) ?? "").trim();
-}
-
 // Invalid input must be rejected, not silently frozen as 0 in a client-facing PDF.
 function numberField(form: FormData, name: string): number | null {
   const raw = field(form, name).replace(/,/g, "");
@@ -41,22 +38,13 @@ function sourceField(form: FormData, name: string): InsightsSource {
   return value === "meta_api" || value === "mock" ? value : "manual";
 }
 
-function redirect(location: string) {
-  return new Response(null, { status: 303, headers: { Location: location } });
-}
-
 // Form POSTs navigate the browser, so a bare text/plain 400 is a dead end. Entries are
 // only preserved via history back (bfcache) — a fresh GET of the form would be blank,
 // so the copy steers to the Back button and the link is a last resort.
 function errorPage(status: number, message: string, backHref: string) {
-  const html = `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Report not generated</title></head>
-<body style="font-family: system-ui, sans-serif; max-width: 32rem; margin: 4rem auto; padding: 0 1rem;">
-<h1 style="font-size:1.25rem;">Report not generated</h1>
-<p>${message}</p>
+  return sharedErrorPage(status, "Report not generated", `<p>${message}</p>
 <p>Use your browser's <strong>Back</strong> button to return to the builder — your entries are preserved there.</p>
-<p><a href="${backHref}">Or reopen the report builder</a>.</p>
-</body></html>`;
-  return new Response(html, { status, headers: { "Content-Type": "text/html; charset=utf-8" } });
+<p><a href="${backHref}">Or reopen the report builder</a>.</p>`);
 }
 
 function coerceNumber(value: unknown): number {

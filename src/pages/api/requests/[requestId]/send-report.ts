@@ -1,5 +1,6 @@
 import type { APIRoute } from "astro";
 import { isAdmin } from "../../../../lib/auth";
+import { EMAIL_RE, errorPage as sharedErrorPage, field, redirect } from "../../../../lib/http";
 import { readBrokerage, readRequest, readSnapshot, writeRequest } from "../../../../lib/storage";
 import { appBaseUrl, sendAndLog } from "../../../../lib/email";
 import { reportDelivery } from "../../../../lib/emailTemplates";
@@ -17,25 +18,10 @@ export const prerender = false;
 // comfortably under that after base64 (+33%).
 const MAX_ATTACH_BYTES = 15_000_000;
 
-const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-
-function field(form: FormData, name: string) {
-  return String(form.get(name) ?? "").trim();
-}
-
-function redirect(location: string) {
-  return new Response(null, { status: 303, headers: { Location: location } });
-}
-
 function errorPage(status: number, message: string, backHref: string) {
-  const html = `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Report not sent</title></head>
-<body style="font-family: system-ui, sans-serif; max-width: 32rem; margin: 4rem auto; padding: 0 1rem;">
-<h1 style="font-size:1.25rem;">Report not sent</h1>
-<p>${message}</p>
+  return sharedErrorPage(status, "Report not sent", `<p>${message}</p>
 <p>Use your browser's <strong>Back</strong> button to return — your entries are preserved there.</p>
-<p><a href="${backHref}">Or go back to the request</a>.</p>
-</body></html>`;
-  return new Response(html, { status, headers: { "Content-Type": "text/html; charset=utf-8" } });
+<p><a href="${backHref}">Or go back to the request</a>.</p>`);
 }
 
 export const POST: APIRoute = async ({ params, request }) => {

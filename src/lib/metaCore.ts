@@ -21,8 +21,12 @@ export function demoMode(): boolean {
   return (process.env.DEMO_MODE ?? import.meta.env.DEMO_MODE) === "1";
 }
 
-export async function fetchJson(url: string, token: string, timeoutMs = GRAPH_TIMEOUT_MS): Promise<any> {
+// One transport: Bearer auth, timeout, JSON parse, Graph-error throw. The
+// public wrappers below just set method/body/default timeout. fetch handles a
+// URLSearchParams or FormData body natively (correct Content-Type auto-set).
+async function graphFetch(url: string, token: string, init: RequestInit, timeoutMs: number): Promise<any> {
   const response = await fetch(url, {
+    ...init,
     headers: { Authorization: `Bearer ${token}` },
     signal: AbortSignal.timeout(timeoutMs)
   });
@@ -33,44 +37,18 @@ export async function fetchJson(url: string, token: string, timeoutMs = GRAPH_TI
   return body;
 }
 
-/** POST with url-encoded params (the Graph API's native parameter format). */
-export async function postForm(
-  url: string,
-  token: string,
-  params: Record<string, string>,
-  timeoutMs = GRAPH_TIMEOUT_MS
-): Promise<any> {
-  const response = await fetch(url, {
-    method: "POST",
-    headers: { Authorization: `Bearer ${token}` },
-    body: new URLSearchParams(params),
-    signal: AbortSignal.timeout(timeoutMs)
-  });
-  const body = await response.json();
-  if (!response.ok || body?.error) {
-    throw new Error(body?.error?.message || `Graph API error ${response.status}`);
-  }
-  return body;
+export function fetchJson(url: string, token: string): Promise<any> {
+  return graphFetch(url, token, {}, GRAPH_TIMEOUT_MS);
+}
+
+/** POST url-encoded params (the Graph API's native parameter format). */
+export function postForm(url: string, token: string, params: Record<string, string>): Promise<any> {
+  return graphFetch(url, token, { method: "POST", body: new URLSearchParams(params) }, GRAPH_TIMEOUT_MS);
 }
 
 /** POST multipart form-data (binary photo uploads). Longer timeout: multi-MB bodies. */
-export async function postMultipart(
-  url: string,
-  token: string,
-  form: FormData,
-  timeoutMs = 30_000
-): Promise<any> {
-  const response = await fetch(url, {
-    method: "POST",
-    headers: { Authorization: `Bearer ${token}` },
-    body: form,
-    signal: AbortSignal.timeout(timeoutMs)
-  });
-  const body = await response.json();
-  if (!response.ok || body?.error) {
-    throw new Error(body?.error?.message || `Graph API error ${response.status}`);
-  }
-  return body;
+export function postMultipart(url: string, token: string, form: FormData): Promise<any> {
+  return graphFetch(url, token, { method: "POST", body: form }, 30_000);
 }
 
 // Under the "new Pages experience" a Page access token is required to publish or

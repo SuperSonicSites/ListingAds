@@ -65,7 +65,7 @@ export async function publishPagePost(
       const form = new FormData();
       form.append("source", new Blob([new Uint8Array(photo.bytes)], { type: photo.mime }), photo.name);
       form.append("published", "false");
-      const body = await postMultipart(`${GRAPH}/${pageId}/photos`, pageToken, form, 30_000);
+      const body = await postMultipart(`${GRAPH}/${pageId}/photos`, pageToken, form);
       const id = typeof body?.id === "string" ? body.id : undefined;
       if (!id) throw new Error("No photo id returned.");
       mediaIds.push(id);

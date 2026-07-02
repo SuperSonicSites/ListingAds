@@ -1,6 +1,7 @@
 import type { APIRoute } from "astro";
 import { isAdmin } from "../../../../lib/auth";
 import { addDays } from "../../../../lib/dates";
+import { ISO_DATE, errorPage as sharedErrorPage, field, redirect, validateCampaignId } from "../../../../lib/http";
 import { readRequest, writeRequest } from "../../../../lib/storage";
 import { applyTransition } from "../../../../lib/transitions";
 import { REQUEST_STATUSES, type RequestStatus } from "../../../../lib/types";
@@ -11,28 +12,12 @@ export const prerender = false;
 // campaign fields that "Record Ad Launch" submits alongside the move. All
 // guard logic lives in lib/transitions (the single place a status changes).
 
-const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
-const CAMPAIGN_ID = /^\d{5,25}$/;
-
-function field(form: FormData, name: string) {
-  return String(form.get(name) ?? "").trim();
-}
-
-function redirect(location: string) {
-  return new Response(null, { status: 303, headers: { Location: location } });
-}
-
 function errorPage(status: number, message: string, backHref?: string) {
   const back = backHref
     ? `<p><a href="${backHref}">Return to the request</a>, or use your browser's <strong>Back</strong> button — your entries are preserved there.</p>`
     : `<p>Use your browser's <strong>Back</strong> button to return to the form — your entries are preserved there.</p>`;
-  const html = `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Status not changed</title></head>
-<body style="font-family: system-ui, sans-serif; max-width: 32rem; margin: 4rem auto; padding: 0 1rem;">
-<h1 style="font-size:1.25rem;">Status not changed</h1>
-<p>${message}</p>
-${back}
-</body></html>`;
-  return new Response(html, { status, headers: { "Content-Type": "text/html; charset=utf-8" } });
+  return sharedErrorPage(status, "Status not changed", `<p>${message}</p>
+${back}`);
 }
 
 // 303 back to where the form was submitted from (board or detail page), as long
@@ -80,16 +65,9 @@ export const POST: APIRoute = async ({ params, request }) => {
     if (!campaignId) {
       return errorPage(400, "Enter the Facebook Campaign ID before recording the launch.", detailHref);
     }
-    if (allowAny) {
-      if (campaignId.length > 100) {
-        return errorPage(400, "Campaign ID must be 1–100 characters.", detailHref);
-      }
-    } else if (!CAMPAIGN_ID.test(campaignId)) {
-      return errorPage(
-        400,
-        "The Facebook Campaign ID should be 5–25 digits. Tick the non-standard ID override to record it anyway.",
-        detailHref
-      );
+    const campaignIdError = validateCampaignId(campaignId, allowAny, "record");
+    if (campaignIdError) {
+      return errorPage(400, campaignIdError, detailHref);
     }
 
     const launchDate = field(form, "ad_launch_date") || record.ad_launch_date || "";

@@ -1,5 +1,6 @@
 import type { APIRoute } from "astro";
 import { isAdmin } from "../../../../lib/auth";
+import { errorPage as sharedErrorPage, redirect } from "../../../../lib/http";
 import { readBrokerage, readRequest, writeRequest } from "../../../../lib/storage";
 import { findAsset, mimeForExt, readAssetBytes } from "../../../../lib/uploads";
 import { publishPagePost, type PublishPhoto } from "../../../../lib/metaPost";
@@ -15,17 +16,8 @@ function errorPage(status: number, message: string, backHref?: string) {
   const back = backHref
     ? `<p><a href="${backHref}">Back to the post editor</a> — or use your browser's <strong>Back</strong> button.</p>`
     : `<p>Use your browser's <strong>Back</strong> button to return to the form.</p>`;
-  const html = `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Post not published</title></head>
-<body style="font-family: system-ui, sans-serif; max-width: 32rem; margin: 4rem auto; padding: 0 1rem;">
-<h1 style="font-size:1.25rem;">Post not published</h1>
-<p>${message}</p>
-${back}
-</body></html>`;
-  return new Response(html, { status, headers: { "Content-Type": "text/html; charset=utf-8" } });
-}
-
-function redirect(location: string) {
-  return new Response(null, { status: 303, headers: { Location: location } });
+  return sharedErrorPage(status, "Post not published", `<p>${message}</p>
+${back}`);
 }
 
 export const POST: APIRoute = async ({ params, request }) => {
