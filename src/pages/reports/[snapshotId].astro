@@ -1,13 +1,17 @@
 ---
 import AppLayout from "../../layouts/AppLayout.astro";
 import SupersonicBrand from "../../components/SupersonicBrand.astro";
-import { formatDateRange, formatNumber } from "../../lib/format";
+import { formatNumber } from "../../lib/format";
 import { readSnapshot } from "../../lib/storage";
 import type { ExecReportSnapshot } from "../../lib/types";
 
 // The Executive Report renders ONLY from the frozen snapshot — no request or
 // brokerage reads. Every image is an embedded data URI; the page looks the
 // same forever regardless of later edits or deleted uploads.
+//
+// Structure mirrors the owner's real reports: 5 minimal, screenshot-forward
+// Letter pages (a 6th only when extra analytics screenshots overflow). Plain
+// bold dark headings ending in a colon; the screenshots do the work.
 
 const snapshotId = Astro.params.snapshotId ?? "";
 const printMode = Astro.url.searchParams.get("print") === "1";
@@ -27,51 +31,33 @@ const shareViewer = Boolean(snapshot && shareTokenParam && snapshot.share_token 
 const pdfHref = `/api/pdf/${snapshotId}${shareViewer ? `?t=${shareTokenParam}` : ""}`;
 const backHref = snapshot ? `/requests/${snapshot.request_id}` : "/";
 
-const dateRange = snapshot
-  ? formatDateRange(snapshot.campaign.ad_launch_date, snapshot.campaign.report_due_date)
-  : "";
-const citiesLine = snapshot ? snapshot.campaign.target_cities.join(", ") : "";
+const gallery = snapshot ? snapshot.images.gallery.filter(Boolean) : [];
 
-const regionRows = snapshot ? snapshot.insights.region.slice(0, 8) : [];
-const ageGenderRows = snapshot ? snapshot.insights.age_gender.slice(0, 8) : [];
-const hasBreakdownRows = regionRows.length > 0 || ageGenderRows.length > 0;
-const insightsScreens = snapshot ? snapshot.images.insights_screens.filter(Boolean) : [];
-// Tables present -> every screenshot goes to a continuation sheet. No tables ->
-// the first screenshot takes the main In-Depth sheet, the rest continue.
-const primaryScreen = !hasBreakdownRows && insightsScreens.length > 0 ? insightsScreens[0] : "";
-const continuationScreens = hasBreakdownRows ? insightsScreens : insightsScreens.slice(1);
-const hasInDepthSheet = hasBreakdownRows || insightsScreens.length > 0;
-
-const realtorSheets = snapshot
-  ? ([
-      { label: "7 day view", image: snapshot.images.realtor_7 },
-      { label: "30 day view", image: snapshot.images.realtor_30 },
-      { label: "90 day view", image: snapshot.images.realtor_90 }
-    ].filter((sheet) => sheet.image))
+// REALTOR.ca — all present panes stacked on one sheet (omit missing/waived).
+const realtorImages = snapshot
+  ? [
+      { label: "7-day", image: snapshot.images.realtor_7 },
+      { label: "30-day", image: snapshot.images.realtor_30 },
+      { label: "90-day", image: snapshot.images.realtor_90 }
+    ].filter((pane) => pane.image)
   : [];
 
-const campaignTypeLabel = snapshot
-  ? snapshot.campaign.campaign_type === "extend"
-    ? "Campaign extension"
-    : "New campaign"
-  : "";
-
-// Sample Overview — guard `ad_sample` (older snapshots predate the field). Each
-// of the two sample sheets (mobile/desktop) renders EITHER a manual Ads Manager
-// screenshot override, or the native Facebook-style mockup when the ad_sample
-// has any text or photos; otherwise the sheet is omitted.
+// Sample Overview — guard `ad_sample` (older snapshots predate the field). If
+// manual mobile/desktop override screenshots exist, show them side by side;
+// otherwise render one compact native Facebook-style mockup from ad_sample.
 const adSample = snapshot?.ad_sample ?? { text: "", images: [] };
 const adSampleImages = adSample.images.filter(Boolean);
-const hasAdSample = Boolean(adSample.text.trim()) || adSampleImages.length > 0;
-const showMobileSample = Boolean(snapshot?.images.ad_preview_mobile) || hasAdSample;
-const showDesktopSample = Boolean(snapshot?.images.ad_preview_desktop) || hasAdSample;
+const previewMobile = snapshot?.images.ad_preview_mobile ?? "";
+const previewDesktop = snapshot?.images.ad_preview_desktop ?? "";
+const previewShots = [previewMobile, previewDesktop].filter(Boolean);
+const hasPreviewShots = previewShots.length > 0;
 
 const hexColor = (value: string | undefined, fallback: string) =>
   value && /^#[0-9a-fA-F]{6}$/.test(value) ? value : fallback;
 
-// Brand colors print as text/icons on white sheets. A light brand color (say #f2e3c6)
-// passes the hex check but is unreadable on paper — darken until it clears the
-// large-text contrast threshold (3:1 against white).
+// Brand colors print as the thin cover rule / small accents on white sheets. A
+// light brand color (say #f2e3c6) passes the hex check but is unreadable on
+// paper — darken until it clears the large-text contrast threshold (3:1).
 function readableOnWhite(hex: string): string {
   let [r, g, b] = [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16));
   const luminance = () => {
@@ -96,30 +82,6 @@ const reportBrandStyle = snapshot
       `--client-accent: ${readableOnWhite(hexColor(snapshot.brokerage.brand_accent, "#c9a86a"))}`
     ].join("; ")
   : undefined;
-
-// --- Small hand-authored inline icon set. Generic geometric line icons only,
-// stroke-based, inherit color via currentColor. ---
-type IconName = "eye" | "people" | "calendar" | "trending-up" | "camera" | "globe" | "home" | "building";
-
-const iconPaths: Record<IconName, string> = {
-  eye: '<path d="M1.5 9S4.5 3.5 9 3.5 16.5 9 16.5 9 13.5 14.5 9 14.5 1.5 9 1.5 9Z"/><circle cx="9" cy="9" r="2.5"/>',
-  people:
-    '<circle cx="6.5" cy="6" r="2.5"/><path d="M2 15c0-2.49 2.01-4.5 4.5-4.5S11 12.51 11 15"/><circle cx="13" cy="7" r="2"/><path d="M12 10.6c1.97.32 3.5 1.94 3.5 4.4"/>',
-  calendar:
-    '<rect x="2.25" y="3.5" width="13.5" height="12" rx="1.5"/><path d="M2.25 7.25h13.5"/><path d="M6 1.75v3"/><path d="M12 1.75v3"/>',
-  "trending-up": '<path d="M2 13.5 7.25 8l3 3 5.75-6.5"/><path d="M12.5 4.25H16v3.5"/>',
-  camera:
-    '<rect x="1.75" y="5" width="14.5" height="10" rx="1.75"/><path d="M6 5l1.25-2h3.5L12 5"/><circle cx="9" cy="10" r="3"/>',
-  globe:
-    '<circle cx="9" cy="9" r="7.25"/><path d="M1.75 9h14.5"/><path d="M9 1.75c2.1 2.05 3.25 4.6 3.25 7.25s-1.15 5.2-3.25 7.25C6.9 14.2 5.75 11.65 5.75 9S6.9 3.8 9 1.75Z"/>',
-  home: '<path d="M2.5 8.5 9 2.75l6.5 5.75"/><path d="M4.25 7v8.25h9.5V7"/><path d="M7.25 15.25v-4.5h3.5v4.5"/>',
-  building:
-    '<rect x="3.5" y="2" width="11" height="14.25" rx="1"/><path d="M6.25 5.25h1.5M10.25 5.25h1.5M6.25 8.5h1.5M10.25 8.5h1.5M6.25 11.75h1.5M10.25 11.75h1.5"/><path d="M7.25 16.25V13.5h3.5v2.75"/>'
-};
-
-type IconProps = { name: IconName; size?: number };
-const Icon = ({ name, size = 18 }: IconProps) =>
-  `<svg width="${size}" height="${size}" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${iconPaths[name]}</svg>`;
 ---
 
 <AppLayout
@@ -164,8 +126,8 @@ const Icon = ({ name, size = 18 }: IconProps) =>
       )}
 
       <article class="report-document" aria-label="Executive advertising report">
-        <!-- p1 · COVER -->
-        <section class="report-sheet report-cover-sheet">
+        <!-- S1 · COVER -->
+        <section class="report-sheet report-cover-sheet exr-cover">
           <div class="report-sheet-topline">
             <div class="report-brand-lockup">
               {snapshot.brokerage.logo_url ? (
@@ -174,313 +136,102 @@ const Icon = ({ name, size = 18 }: IconProps) =>
                 <span class="report-brand-name">{snapshot.brokerage.name}</span>
               )}
             </div>
-            <p class="report-eyebrow-label">Executive Report</p>
           </div>
 
-          <header class="report-cover-header">
-            <div class="report-cover-title">
-              <p>Online Advertising Campaign</p>
-              <h1>Executive Report: {snapshot.listing.address}</h1>
-            </div>
-            <div class="report-period-pill">
-              <Fragment set:html={Icon({ name: "calendar", size: 16 })} />
-              <div class="report-period-text">
-                <span class="report-period-label">Campaign period</span>
-                <span class="report-period-value">{dateRange}</span>
-              </div>
-            </div>
+          <header class="exr-cover-header">
+            <h1>Executive Report: {snapshot.listing.address}</h1>
+            <p class="exr-cover-sub">Online Advertising Campaign</p>
           </header>
 
-          {snapshot.images.hero ? (
-            <div class="exr-hero-panel">
-              <img src={snapshot.images.hero} alt={`${snapshot.listing.address} hero photo`} />
-            </div>
-          ) : (
-            <div class="exr-hero-panel exr-media-empty" aria-hidden="true">
-              <Fragment set:html={Icon({ name: "camera", size: 30 })} />
-            </div>
-          )}
-        </section>
-
-        <!-- p2 · CAMPAIGN STATS -->
-        <section class="report-sheet">
-          <header class="report-section-heading">
-            <span>01</span>
-            <div>
-              <p>Meta ads campaign</p>
-              <h2>Campaign results</h2>
-            </div>
-          </header>
-
-          <section class="report-widget-row exr-widget-row-3" aria-label="Campaign metrics">
-            <article class="report-widget">
-              <span class="report-widget-icon"><Fragment set:html={Icon({ name: "eye" })} /></span>
-              <div class="report-widget-body">
-                <span>Total Ad Impressions</span>
-                <strong>{formatNumber(snapshot.insights.impressions)}</strong>
+          <div class="exr-cover-media">
+            {snapshot.images.hero && (
+              <div class="exr-cover-hero">
+                <img src={snapshot.images.hero} alt={`${snapshot.listing.address}`} />
               </div>
-            </article>
-            <article class="report-widget">
-              <span class="report-widget-icon"><Fragment set:html={Icon({ name: "people" })} /></span>
-              <div class="report-widget-body">
-                <span>Reach</span>
-                <strong>{formatNumber(snapshot.insights.reach)}</strong>
+            )}
+            {gallery.length > 0 && (
+              <div class="exr-cover-grid">
+                {gallery.map((image, index) => (
+                  <img src={image} alt={`Listing photo ${index + 1}`} />
+                ))}
               </div>
-            </article>
-            <article class="report-widget">
-              <span class="report-widget-icon"><Fragment set:html={Icon({ name: "trending-up" })} /></span>
-              <div class="report-widget-body">
-                <span>All Clicks &amp; Likes</span>
-                <strong>{formatNumber(snapshot.insights.clicks_all)}</strong>
-              </div>
-            </article>
-          </section>
-
-          <div class="report-summary-card">
-            <span class="report-outline-label">Summary</span>
-            <p>
-              Your listing was advertised across Facebook and Instagram to home buyers in {citiesLine}.
-            </p>
+            )}
           </div>
-
-          <footer class="exr-chip-strip">
-            <span class="exr-chip">$ {snapshot.campaign.budget} campaign</span>
-            <span class="exr-chip">{campaignTypeLabel}</span>
-            {snapshot.campaign.fb_campaign_id && (
-              <span class="exr-chip exr-chip-mono">Campaign ID {snapshot.campaign.fb_campaign_id}</span>
-            )}
-          </footer>
         </section>
 
-        <!-- p3 · SAMPLE OVERVIEW — MOBILE -->
-        {showMobileSample && (
-          <section class="report-sheet">
-            <header class="report-section-heading">
-              <span>02</span>
-              <div>
-                <p>Facebook &amp; Instagram Sample Overview</p>
-                <h2>Mobile feed</h2>
-              </div>
-            </header>
-            {snapshot.images.ad_preview_mobile ? (
-              <div class="exr-contain-panel">
-                <img src={snapshot.images.ad_preview_mobile} alt="Mobile feed ad preview" />
-              </div>
-            ) : (
-              <div class="exr-sample-frame exr-sample-mobile">
-                <article class="exr-fb-card">
-                  <div class="exr-fb-head">
-                    {snapshot.brokerage.logo_url ? (
-                      <img class="exr-fb-avatar" src={snapshot.brokerage.logo_url} alt={snapshot.brokerage.name} />
-                    ) : (
-                      <span class="exr-fb-avatar exr-fb-avatar-fallback">{snapshot.brokerage.name.slice(0, 1)}</span>
-                    )}
-                    <div>
-                      <div class="exr-fb-name">{snapshot.brokerage.name}</div>
-                      <div class="exr-fb-sub">Sponsored · 🌐</div>
-                    </div>
-                  </div>
-                  {adSample.text && <div class="exr-fb-text">{adSample.text}</div>}
-                  {adSampleImages.length > 0 && (
-                    <div class:list={["exr-fb-grid", { odd: adSampleImages.length % 2 === 1 }]}>
-                      {adSampleImages.map((image, index) => (
-                        <img src={image} alt={`Ad photo ${index + 1}`} />
-                      ))}
-                    </div>
-                  )}
-                  <div class="exr-fb-actions">
-                    <span>👍 Like</span>
-                    <span>💬 Comment</span>
-                    <span>↗ Share</span>
-                  </div>
-                </article>
-              </div>
-            )}
-            <p class="exr-caption">How your ad appeared in the Facebook &amp; Instagram mobile feed.</p>
-          </section>
-        )}
+        <!-- S2 · CAMPAIGN STATS + SAMPLE OVERVIEW -->
+        <section class="report-sheet exr-stats-sheet">
+          <p class="exr-intro">
+            Below you will find the latest Facebook &amp; Instagram (Meta Ad platform) Ads campaigns stats.
+          </p>
 
-        <!-- p4 · SAMPLE OVERVIEW — DESKTOP -->
-        {showDesktopSample && (
-          <section class="report-sheet">
-            <header class="report-section-heading">
-              <span>02</span>
-              <div>
-                <p>Facebook &amp; Instagram Sample Overview</p>
-                <h2>Desktop feed</h2>
-              </div>
-            </header>
-            {snapshot.images.ad_preview_desktop ? (
-              <div class="exr-contain-panel">
-                <img src={snapshot.images.ad_preview_desktop} alt="Desktop feed ad preview" />
-              </div>
-            ) : (
-              <div class="exr-sample-frame exr-sample-desktop">
-                <article class="exr-fb-card">
-                  <div class="exr-fb-head">
-                    {snapshot.brokerage.logo_url ? (
-                      <img class="exr-fb-avatar" src={snapshot.brokerage.logo_url} alt={snapshot.brokerage.name} />
-                    ) : (
-                      <span class="exr-fb-avatar exr-fb-avatar-fallback">{snapshot.brokerage.name.slice(0, 1)}</span>
-                    )}
-                    <div>
-                      <div class="exr-fb-name">{snapshot.brokerage.name}</div>
-                      <div class="exr-fb-sub">Sponsored · 🌐</div>
-                    </div>
-                  </div>
-                  {adSample.text && <div class="exr-fb-text">{adSample.text}</div>}
-                  {adSampleImages.length > 0 && (
-                    <div class:list={["exr-fb-grid", { odd: adSampleImages.length % 2 === 1 }]}>
-                      {adSampleImages.map((image, index) => (
-                        <img src={image} alt={`Ad photo ${index + 1}`} />
-                      ))}
-                    </div>
-                  )}
-                  <div class="exr-fb-actions">
-                    <span>👍 Like</span>
-                    <span>💬 Comment</span>
-                    <span>↗ Share</span>
-                  </div>
-                </article>
-              </div>
-            )}
-            <p class="exr-caption">How your ad appeared in the Facebook &amp; Instagram desktop feed.</p>
-          </section>
-        )}
+          <p class="exr-stat-line">
+            <span>Total Ad Impressions: <strong>{formatNumber(snapshot.insights.impressions)}</strong></span>
+            <span>Reach: <strong>{formatNumber(snapshot.insights.reach)}</strong></span>
+            <span>All Clicks &amp; Likes: <strong>{formatNumber(snapshot.insights.clicks_all)}</strong></span>
+          </p>
 
-        <!-- p5 · IN-DEPTH DATA OF USERS -->
-        {hasInDepthSheet && (
-          <section class="report-sheet">
-            <header class="report-section-heading">
-              <span>03</span>
-              <div>
-                <p>In-Depth Data Of Users</p>
-                <h2>Ad campaign geo-targeting, user insights and visitor clicks on the listing</h2>
-              </div>
-            </header>
+          <h2 class="exr-heading">Facebook &amp; Instagram Sample Overview:</h2>
 
-            {hasBreakdownRows ? (
-              <Fragment>
-                {regionRows.length > 0 && (
-                  <section class="report-table-card" aria-label="Regional breakdown">
-                    <div class="exr-data-row exr-data-head">
-                      <span>Region</span>
-                      <span>Impressions</span>
-                      <span>Reach</span>
-                      <span>Clicks</span>
-                    </div>
-                    {regionRows.map((row) => (
-                      <div class="exr-data-row">
-                        <span>{row.key}</span>
-                        <strong>{formatNumber(row.impressions)}</strong>
-                        <strong>{formatNumber(row.reach)}</strong>
-                        <strong>{formatNumber(row.clicks)}</strong>
-                      </div>
-                    ))}
-                  </section>
-                )}
-                {ageGenderRows.length > 0 && (
-                  <section class="report-table-card" aria-label="Age and gender breakdown">
-                    <div class="exr-data-row exr-data-head">
-                      <span>Age &amp; Gender</span>
-                      <span>Impressions</span>
-                      <span>Reach</span>
-                      <span>Clicks</span>
-                    </div>
-                    {ageGenderRows.map((row) => (
-                      <div class="exr-data-row">
-                        <span>{row.key}</span>
-                        <strong>{formatNumber(row.impressions)}</strong>
-                        <strong>{formatNumber(row.reach)}</strong>
-                        <strong>{formatNumber(row.clicks)}</strong>
-                      </div>
-                    ))}
-                  </section>
-                )}
-              </Fragment>
-            ) : (
-              <div class="exr-contain-panel exr-contain-tall">
-                <img src={primaryScreen} alt="Ads Manager audience insights screenshot" />
-              </div>
-            )}
-          </section>
-        )}
-
-        {continuationScreens.map((screen) => (
-          <section class="report-sheet">
-            <header class="report-section-heading">
-              <span>03</span>
-              <div>
-                <p>In-Depth Data — continued</p>
-                <h2>Ads Manager insights</h2>
-              </div>
-            </header>
-            <div class="exr-contain-panel exr-contain-tall">
-              <img src={screen} alt="Ads Manager audience insights screenshot" />
-            </div>
-          </section>
-        ))}
-
-        <!-- p6–8 · REALTOR.CA -->
-        {realtorSheets.map((sheet) => (
-          <section class="report-sheet">
-            <header class="report-section-heading">
-              <span>04</span>
-              <div>
-                <p>REALTOR.ca performance</p>
-                <h2>{sheet.label}</h2>
-              </div>
-            </header>
-            <div class="exr-contain-panel exr-contain-realtor">
-              <img src={sheet.image} alt={`REALTOR.ca ${sheet.label} statistics screenshot`} />
-            </div>
-          </section>
-        ))}
-
-        <!-- p9 · GALLERY -->
-        <section class="report-sheet">
-          <header class="report-section-heading">
-            <span>05</span>
-            <div>
-              <p>The listing</p>
-              <h2>Photo highlights</h2>
-            </div>
-          </header>
-
-          {snapshot.images.hero ? (
-            <div class="exr-gallery-hero">
-              <img src={snapshot.images.hero} alt={`${snapshot.listing.address} hero photo`} />
-            </div>
-          ) : (
-            <div class="exr-gallery-hero exr-media-empty" aria-hidden="true">
-              <Fragment set:html={Icon({ name: "camera", size: 30 })} />
-            </div>
-          )}
-
-          <div class="exr-gallery-grid">
-            {snapshot.images.gallery.map((image, index) =>
-              image ? (
-                <img src={image} alt={`Listing photo ${index + 1}`} />
-              ) : (
-                <div class="exr-media-empty" aria-hidden="true">
-                  <Fragment set:html={Icon({ name: "camera", size: 22 })} />
+          {hasPreviewShots ? (
+            <div class:list={["exr-preview-shots", { single: previewShots.length === 1 }]}>
+              {previewShots.map((image) => (
+                <div class="exr-shot">
+                  <img src={image} alt="Ad preview" />
                 </div>
-              )
-            )}
-          </div>
+              ))}
+            </div>
+          ) : (
+            <div class="exr-sample-frame">
+              <article class="exr-fb-card">
+                <div class="exr-fb-head">
+                  {snapshot.brokerage.logo_url ? (
+                    <img class="exr-fb-avatar" src={snapshot.brokerage.logo_url} alt={snapshot.brokerage.name} />
+                  ) : (
+                    <span class="exr-fb-avatar exr-fb-avatar-fallback">{snapshot.brokerage.name.slice(0, 1)}</span>
+                  )}
+                  <div>
+                    <div class="exr-fb-name">{snapshot.brokerage.name}</div>
+                    <div class="exr-fb-sub">Sponsored · 🌐</div>
+                  </div>
+                </div>
+                {adSample.text && <div class="exr-fb-text">{adSample.text}</div>}
+                {adSampleImages.length > 0 && (
+                  <div class:list={["exr-fb-grid", { odd: adSampleImages.length % 2 === 1 }]}>
+                    {adSampleImages.map((image, index) => (
+                      <img src={image} alt={`Ad photo ${index + 1}`} />
+                    ))}
+                  </div>
+                )}
+                <div class="exr-fb-actions">
+                  <span>👍 Like</span>
+                  <span>💬 Comment</span>
+                  <span>↗ Share</span>
+                </div>
+              </article>
+            </div>
+          )}
         </section>
 
-        <!-- p10 · DISCLAIMER -->
-        <section class="report-sheet">
-          <header class="report-section-heading">
-            <span>06</span>
-            <div>
-              <p>Compliance</p>
-              <h2>Disclaimer</h2>
-            </div>
-          </header>
+        <!-- S3 · REALTOR.ca MLS STATS -->
+        {realtorImages.length > 0 && (
+          <section class="report-sheet exr-realtor-sheet">
+            <h2 class="exr-heading">7, 30, 90 Day Realtor.ca MLS Stats:</h2>
+            <p class="exr-caption">Overview of users visiting MLS Realtor.ca listing for 7, 30, 90 days stats.</p>
 
-          <section class="report-disclaimer-card" aria-label="Report disclaimer">
+            <div class="exr-realtor-stack">
+              {realtorImages.map((pane) => (
+                <div class="exr-shot exr-shot-realtor">
+                  <img src={pane.image} alt={`REALTOR.ca ${pane.label} statistics`} />
+                </div>
+              ))}
+            </div>
+          </section>
+        )}
+
+        <!-- S5 · DISCLAIMER -->
+        <section class="report-sheet exr-disclaimer-sheet">
+          <div class="exr-disclaimer-body">
             <p>
               This report is intended solely for the designated recipient and is provided for informational
               purposes only. All data is believed to be accurate at the time of publication but is subject to
@@ -491,25 +242,13 @@ const Icon = ({ name, size = 18 }: IconProps) =>
               This report includes real estate advertising or listing content and complies with applicable
               regulations under the Real Estate Services Act.
             </p>
-            <dl>
-              <div>
-                <dt>Prepared by</dt>
-                <dd>{snapshot.brokerage.name}</dd>
-              </div>
-              {snapshot.brokerage.address_line && (
-                <div>
-                  <dt>Brokerage address</dt>
-                  <dd>{snapshot.brokerage.address_line}</dd>
-                </div>
-              )}
-              {snapshot.brokerage.contact_line && (
-                <div>
-                  <dt>Contact</dt>
-                  <dd>{snapshot.brokerage.contact_line}</dd>
-                </div>
-              )}
-            </dl>
-          </section>
+          </div>
+
+          <div class="exr-prepared">
+            <p>Prepared by {snapshot.brokerage.name}</p>
+            {snapshot.brokerage.address_line && <p>Brokerage Address: {snapshot.brokerage.address_line}</p>}
+            {snapshot.brokerage.contact_line && <p>Contact: {snapshot.brokerage.contact_line}</p>}
+          </div>
 
           <footer class="report-footer">
             <span>{snapshot.brokerage.website}</span>
@@ -532,120 +271,166 @@ const Icon = ({ name, size = 18 }: IconProps) =>
 
 <style>
   /* Executive-Report-specific pieces; the shared report sheet/print model lives
-     in global.css and is untouched. */
+     in global.css and is untouched. The design is deliberately minimal: plain
+     bold dark headings ending in a colon, muted body copy, and the screenshots
+     doing the work — mirroring the owner's real reports. */
 
-  .exr-hero-panel {
-    height: 5in;
+  /* Shared heading + caption -------------------------------------------------*/
+  .exr-heading {
+    margin: 0;
+    color: var(--ink, #1b1b1b);
+    font-size: 1.4rem;
+    font-weight: 800;
+    line-height: 1.25;
+  }
+
+  .exr-caption {
+    margin: 0;
+    color: var(--muted, #837c6f);
+    font-size: 0.95rem;
+    font-weight: 500;
+    line-height: 1.5;
+  }
+
+  /* Screenshot frame — contained, no chrome (a faint hairline for definition). */
+  .exr-shot {
+    display: flex;
+    align-items: center;
+    justify-content: center;
     overflow: hidden;
-    border-radius: 12px;
+  }
+
+  .exr-shot img {
+    display: block;
+    max-width: 100%;
+    max-height: 100%;
+    object-fit: contain;
+  }
+
+  /* S1 · Cover ---------------------------------------------------------------*/
+  .exr-cover {
+    gap: 22px;
+  }
+
+  .exr-cover-header {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+
+  .exr-cover-header h1 {
+    margin: 0;
+    color: var(--ink, #1b1b1b);
+    font-size: 2rem;
+    font-weight: 800;
+    line-height: 1.15;
+  }
+
+  .exr-cover-sub {
+    margin: 0;
+    color: var(--muted, #837c6f);
+    font-size: 1.05rem;
+    font-weight: 600;
+  }
+
+  .exr-cover-media {
+    display: flex;
+    min-height: 0;
+    flex: 1;
+    flex-direction: column;
+    gap: 12px;
+  }
+
+  .exr-cover-hero {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow: hidden;
+    border-radius: 10px;
     background: var(--surface, #f6f5f1);
   }
 
-  .exr-hero-panel img {
+  .exr-cover-hero img {
     display: block;
     width: 100%;
     height: 100%;
     object-fit: cover;
   }
 
-  .exr-media-empty {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    color: #c8c4bc;
-    background: var(--surface, #f6f5f1);
-    border-radius: 12px;
-  }
-
-  .exr-widget-row-3 {
+  .exr-cover-grid {
+    display: grid;
+    flex: 0 0 auto;
     grid-template-columns: repeat(3, minmax(0, 1fr));
+    grid-auto-rows: 1.55in;
+    gap: 10px;
   }
 
-  .exr-chip-strip {
+  .exr-cover-grid img {
+    display: block;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    border-radius: 8px;
+    background: var(--surface, #f6f5f1);
+  }
+
+  /* S2 · Stats + Sample ------------------------------------------------------*/
+  .exr-intro {
+    margin: 0;
+    color: var(--ink, #1b1b1b);
+    font-size: 1rem;
+    font-weight: 500;
+    line-height: 1.55;
+  }
+
+  .exr-stat-line {
     display: flex;
     flex-wrap: wrap;
-    align-items: center;
-    gap: 10px;
-    margin-top: auto;
-    border-top: 1px solid var(--hairline, #e4e1da);
-    padding-top: 18px;
-  }
-
-  .exr-chip {
-    display: inline-flex;
-    align-items: center;
-    border-radius: 999px;
-    background: color-mix(in srgb, var(--client-accent) 16%, #ffffff);
-    color: var(--client-primary);
-    padding: 7px 14px;
-    font-size: 0.78rem;
-    font-weight: 700;
-  }
-
-  .exr-chip-mono {
-    background: var(--surface, #f6f5f1);
-    color: var(--muted, #837c6f);
-    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-    font-size: 0.72rem;
-    font-weight: 600;
-  }
-
-  /* Contained screenshot panels (ad previews, Ads Manager, REALTOR.ca). */
-  .exr-contain-panel {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    overflow: hidden;
-    border-radius: 12px;
-    background: var(--surface, #f6f5f1);
-    padding: 16px;
-  }
-
-  .exr-contain-panel img {
-    display: block;
-    max-width: 100%;
-    max-height: 8in;
-    object-fit: contain;
-    border-radius: 8px;
-  }
-
-  .exr-contain-tall img {
-    max-height: 8.4in;
-  }
-
-  .exr-contain-realtor img {
-    max-height: 8.2in;
-  }
-
-  .exr-caption {
+    gap: 8px 26px;
     margin: 0;
-    color: var(--muted, #837c6f);
-    font-size: 0.86rem;
-    font-weight: 600;
-    text-align: center;
+    color: var(--ink, #1b1b1b);
+    font-size: 1.15rem;
+    font-weight: 500;
   }
 
-  /* Native Facebook-style ad-sample mockup (reuses the post-editor fb-card
-     visual language). The frame centers the card and caps its width per feed. */
+  .exr-stat-line strong {
+    font-size: 1.5rem;
+    font-weight: 800;
+  }
+
+  /* Manual override screenshots, side by side (or single, centered). */
+  .exr-preview-shots {
+    display: grid;
+    min-height: 0;
+    flex: 1;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 14px;
+    align-items: start;
+    justify-items: center;
+  }
+
+  .exr-preview-shots.single {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .exr-preview-shots .exr-shot {
+    width: 100%;
+    height: 100%;
+  }
+
+  /* Native Facebook-style ad-sample mockup — one compact card, sized to fit the
+     lower half of the sheet. */
   .exr-sample-frame {
     display: flex;
+    min-height: 0;
+    flex: 1;
     align-items: flex-start;
     justify-content: center;
     overflow: hidden;
-    border-radius: 12px;
-    background: var(--surface, #f6f5f1);
-    padding: 20px 16px;
-  }
-
-  .exr-sample-mobile .exr-fb-card {
-    width: 3.4in;
-  }
-
-  .exr-sample-desktop .exr-fb-card {
-    width: 5.6in;
+    padding-top: 4px;
   }
 
   .exr-fb-card {
+    width: 4in;
     max-width: 100%;
     overflow: hidden;
     border: 1px solid #dadde1;
@@ -698,7 +483,7 @@ const Icon = ({ name, size = 18 }: IconProps) =>
     white-space: pre-wrap;
     overflow-wrap: anywhere;
     display: -webkit-box;
-    -webkit-line-clamp: 12;
+    -webkit-line-clamp: 8;
     -webkit-box-orient: vertical;
     overflow: hidden;
   }
@@ -736,131 +521,72 @@ const Icon = ({ name, size = 18 }: IconProps) =>
     text-align: center;
   }
 
-  /* Four-column breakdown tables (no icon column, three numeric columns). */
-  .exr-data-row {
-    display: grid;
-    grid-template-columns: 1.5fr 0.8fr 0.8fr 0.8fr;
+  .exr-realtor-sheet,
+  .exr-stats-sheet {
     gap: 14px;
-    align-items: center;
-    padding: 12px 18px;
   }
 
-  .exr-data-row + .exr-data-row {
-    border-top: 1px solid var(--hairline, #e4e1da);
-  }
-
-  .exr-data-row span {
-    color: var(--ink, #1b1b1b);
-    font-size: 0.82rem;
-    font-weight: 600;
-  }
-
-  .exr-data-row strong {
-    justify-self: end;
-    color: var(--ink, #1b1b1b);
-    font-size: 0.92rem;
-    font-weight: 740;
-  }
-
-  .exr-data-head {
-    border-bottom: 1px solid var(--hairline, #e4e1da);
-  }
-
-  .exr-data-head span {
-    color: var(--muted, #837c6f);
-    font-size: 0.66rem;
-    font-weight: 700;
-    letter-spacing: 0.05em;
-    text-transform: uppercase;
-  }
-
-  .exr-data-head span:not(:first-child) {
-    justify-self: end;
-  }
-
-  /* Gallery: hero large + 6 in a fixed 3x2 grid. */
-  .exr-gallery-hero {
-    height: 4in;
-    overflow: hidden;
-    border-radius: 12px;
-    background: var(--surface, #f6f5f1);
-  }
-
-  .exr-gallery-hero img {
-    display: block;
-    width: 100%;
-    height: 100%;
-    object-fit: cover;
-  }
-
-  .exr-gallery-grid {
-    display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-    grid-auto-rows: 1.85in;
+  /* S3 · REALTOR.ca — three panes stacked ------------------------------------*/
+  .exr-realtor-stack {
+    display: flex;
+    min-height: 0;
+    flex: 1;
+    flex-direction: column;
     gap: 12px;
   }
 
-  .exr-gallery-grid img,
-  .exr-gallery-grid .exr-media-empty {
-    display: block;
-    width: 100%;
-    height: 100%;
-    object-fit: cover;
-    border-radius: 9px;
-    background: var(--surface, #f6f5f1);
+  .exr-shot-realtor {
+    flex: 1;
+    min-height: 0;
   }
 
+  /* S5 · Disclaimer ----------------------------------------------------------*/
+  .exr-disclaimer-sheet {
+    gap: 22px;
+  }
+
+  .exr-disclaimer-body {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+  }
+
+  .exr-disclaimer-body p {
+    margin: 0;
+    color: var(--muted, #837c6f);
+    font-size: 0.95rem;
+    line-height: 1.6;
+  }
+
+  .exr-prepared {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  .exr-prepared p {
+    margin: 0;
+    color: var(--ink, #1b1b1b);
+    font-size: 0.95rem;
+    font-weight: 600;
+  }
+
+  .exr-disclaimer-sheet .report-footer {
+    margin-top: auto;
+  }
+
+  /* Screen-only responsiveness ----------------------------------------------*/
   @media (max-width: 760px) {
-    .exr-hero-panel {
-      height: 3in;
+    .exr-cover-header h1 {
+      font-size: 1.6rem;
     }
 
-    .exr-widget-row-3 {
+    .exr-preview-shots {
       grid-template-columns: 1fr;
     }
 
-    .exr-gallery-hero {
-      height: 2.6in;
-    }
-
-    .exr-gallery-grid {
-      grid-template-columns: repeat(2, minmax(0, 1fr));
-      grid-auto-rows: 1.5in;
-    }
-
-    .exr-data-row {
-      grid-template-columns: 1fr;
-      gap: 4px;
-    }
-
-    .exr-data-row strong {
-      justify-self: start;
-    }
-  }
-
-  @media print {
-    .exr-hero-panel {
-      height: 4.9in;
-    }
-
-    .exr-contain-panel img {
-      max-height: 7.8in;
-    }
-
-    .exr-contain-tall img {
-      max-height: 8.2in;
-    }
-
-    .exr-contain-realtor img {
-      max-height: 8in;
-    }
-
-    .exr-gallery-hero {
-      height: 3.9in;
-    }
-
-    .exr-gallery-grid {
-      grid-auto-rows: 1.8in;
+    .exr-stat-line {
+      font-size: 1.05rem;
     }
   }
 </style>

@@ -5,9 +5,10 @@ Internal tool for managing listing ad campaigns end-to-end:
 1. **Client intake** — each brokerage gets a dedicated secret link
    (`/intake/<token>`) where they submit: listing address, ad budget
    ($50/$100/$150/$200), campaign type (new / extend), up to 10 target cities,
-   a Dropbox/Drive photos link (exactly 10 photos), their REALTOR.ca stats
-   share link, and notes. They get an on-screen confirmation + a confirmation
-   email; a card appears in **New Order** on the team kanban.
+   their REALTOR.ca stats share link, and notes. They get an on-screen
+   confirmation + a confirmation email; a card appears in **New Order** on the
+   team kanban. Listing photos are fetched from REALTOR.ca (from the stats link)
+   in the post editor — the client no longer supplies a photos folder.
 2. **Post creation** — the card's post editor auto-assembles the emoji listing
    post (price, beds/baths, neighborhood, nowforsale.co short link, brokerage
    phone line and sign-off) with a live Facebook-style preview. The short link

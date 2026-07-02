@@ -28,7 +28,9 @@ const published = request.post_published;
 const postApi = `/api/requests/${request.id}/post`;
 const publishApi = `/api/requests/${request.id}/publish-post`;
 const uploadApi = `/api/requests/${request.id}/upload`;
+const fetchPhotosApi = `/api/requests/${request.id}/fetch-photos`;
 const uploadsBase = `/api/uploads/${request.id}`;
+const hasStatsLink = Boolean(request.realtor_stats_link);
 
 const canReady = request.status === "new_order" && request.campaign_type !== "extend";
 const isExtendAtNewOrder = request.status === "new_order" && request.campaign_type === "extend";
@@ -160,6 +162,19 @@ const publishedDate = published ? formatDate(published.published_at.slice(0, 10)
               <h2>Photos</h2>
               <span class="count-badge" id="pick-count">{initialSelection.length} of 10 picked</span>
             </div>
+            <p class="hint">
+              Fetch pulls the first 10 listing photos from REALTOR.ca; drop files here to add or replace.
+            </p>
+            <div class="photos-toolbar">
+              <button class="button secondary sm" type="button" id="fetch-photos" disabled={!hasStatsLink}>
+                Fetch photos from REALTOR.ca
+              </button>
+              {
+                !hasStatsLink && (
+                  <span class="fetch-hint">No REALTOR.ca stats link on this request — add one to enable fetch.</span>
+                )
+              }
+            </div>
             <div class="dropzone" id="dropzone" tabindex="0">
               <strong>Drop photos here, click to browse, or paste a screenshot</strong>
               <span>JPEG / PNG / WebP — large images are downscaled in the browser before upload.</span>
@@ -277,6 +292,7 @@ const publishedDate = published ? formatDate(published.published_at.slice(0, 10)
     address: request.listing_address,
     pageName: brokerage.name,
     uploadApi,
+    fetchPhotosApi,
     uploadsBase,
     initialSelection,
     requestId: request.id
@@ -571,6 +587,49 @@ const publishedDate = published ? formatDate(published.published_at.slice(0, 10)
     }
   });
 
+  // --- Fetch photos from REALTOR.ca -----------------------------------------
+  // Pulls the first 10 listing photos server-side (headless Chrome walks the
+  // stats share link → public listing → gallery). On success we reuse the same
+  // saveState() + reload() pattern as uploads so the new thumbnails render.
+  const fetchButton = document.getElementById("fetch-photos");
+  if (fetchButton) {
+    fetchButton.addEventListener("click", async () => {
+      if (uploading || fetchButton.disabled) return;
+      uploading = true;
+      const label = fetchButton.textContent;
+      fetchButton.disabled = true;
+      fetchButton.textContent = "Fetching from REALTOR.ca… ~30s";
+      note("Fetching photos from REALTOR.ca — this takes about 30 seconds…");
+      try {
+        const response = await fetch(fetchPhotosApi, { method: "POST" });
+        let data = null;
+        try {
+          data = await response.json();
+        } catch {}
+        const savedCount = data && typeof data.saved === "number" ? data.saved : 0;
+        const warnings = data && Array.isArray(data.warnings) ? data.warnings : [];
+        if (response.ok && savedCount > 0) {
+          // Reload re-renders the grid from disk; fetched photos land unselected
+          // (unlike dropzone uploads). Preserve the in-progress editor first.
+          saveState();
+          location.reload();
+          return;
+        }
+        const message =
+          (data && data.error) ||
+          (warnings.length ? warnings.join(" ") : "No photos were fetched from REALTOR.ca — upload them manually.");
+        note(message, true);
+      } catch {
+        note("Couldn't reach the photo fetcher — check your connection and try again.", true);
+      } finally {
+        // Only reached when we didn't reload (failure / zero saved).
+        uploading = false;
+        fetchButton.disabled = false;
+        fetchButton.textContent = label;
+      }
+    });
+  }
+
   // --- Publish confirmation -------------------------------------------------
   if (publishForm) {
     publishForm.addEventListener("submit", (event) => {
@@ -743,6 +802,20 @@ const publishedDate = published ? formatDate(published.published_at.slice(0, 10)
     border: 1px solid var(--ss-border);
     background: var(--ss-surface);
     color: var(--ss-text-soft);
+  }
+
+  .photos-toolbar {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 12px;
+  }
+
+  .fetch-hint {
+    color: var(--ss-muted);
+    font-size: 0.8rem;
+    font-weight: 500;
   }
 
   .dropzone {

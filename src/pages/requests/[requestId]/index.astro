@@ -215,12 +215,6 @@ const addressLines = brokerage
                   </div>
                   <div><dt>Target cities</dt><dd>{request.target_cities.join(", ")}</dd></div>
                   <div>
-                    <dt>Photos link</dt>
-                    <dd>
-                      <a href={request.photos_link} target="_blank" rel="noopener">{request.photos_link}</a>
-                    </dd>
-                  </div>
-                  <div>
                     <dt>Realtor.ca stats link</dt>
                     <dd>
                       <a href={request.realtor_stats_link} target="_blank" rel="noopener">
@@ -251,31 +245,46 @@ const addressLines = brokerage
                   <form class="shortlink-form" method="post" action={`/api/requests/${request.id}/shortlink`}>
                     <div class="client-field-grid two">
                       <label class="client-field">
+                        <span>MLS® number</span>
+                        <input
+                          type="text"
+                          name="mls_number"
+                          id="mls-number"
+                          inputmode="numeric"
+                          pattern="[0-9]{3,10}"
+                          placeholder="1034715"
+                          autocomplete="off"
+                          required
+                        />
+                      </label>
+                      <label class="client-field">
                         <span>Path on {shortDomain()}</span>
                         <input
                           type="text"
                           name="path"
+                          id="shortlink-path"
                           pattern="[a-z0-9\-]{3,40}"
-                          placeholder="mls17354"
+                          placeholder="mls1034715"
                           autocomplete="off"
+                          readonly
                         />
                       </label>
-                      <label class="client-field">
-                        <span>Destination URL (where the short link points)</span>
-                        <input type="url" name="original_url" placeholder="https://…" />
+                      <label class="client-field wide">
+                        <span>Destination URL (the listing page on {brokerage?.website || "the brokerage site"})</span>
+                        <input
+                          type="url"
+                          name="original_url"
+                          id="shortlink-dest"
+                          placeholder={`${brokerage?.website || "https://…"}/listing/…`}
+                          value={brokerage?.website ? `${brokerage.website.replace(/\/+$/, "")}/listing/` : ""}
+                        />
+                        <span class="field-hint">
+                          Complete with the listing page — the Meta UTM tags are added automatically.
+                        </span>
                       </label>
                     </div>
                     <div class="shortlink-actions">
                       <button class="button primary sm" type="submit">Create {shortDomain()} link</button>
-                    </div>
-                    <div class="client-field-grid two shortlink-manual">
-                      <label class="client-field">
-                        <span>…or paste an existing short link</span>
-                        <input type="url" name="manual_url" placeholder={`https://${shortDomain()}/…`} />
-                      </label>
-                      <div class="shortlink-manual-action">
-                        <button class="button secondary sm" type="submit">Save pasted link</button>
-                      </div>
                     </div>
                   </form>
                 )}
@@ -608,6 +617,16 @@ const addressLines = brokerage
     if (completeForm.dataset.sent === "1") return;
     if (!confirm("The report hasn't been sent — complete anyway?")) event.preventDefault();
   });
+
+  // Short link: the MLS® number drives the nowforsale.co path (mls{number}).
+  const mlsInput = document.querySelector<HTMLInputElement>("#mls-number");
+  const pathInput = document.querySelector<HTMLInputElement>("#shortlink-path");
+  if (mlsInput && pathInput) {
+    mlsInput.addEventListener("input", () => {
+      const digits = mlsInput.value.replace(/\D/g, "");
+      pathInput.value = digits ? `mls${digits}` : "";
+    });
+  }
 </script>
 
 <style>
@@ -869,16 +888,15 @@ const addressLines = brokerage
     justify-content: flex-end;
   }
 
-  .shortlink-manual {
-    border-top: 1px dashed var(--ss-border-strong);
-    padding-top: 12px;
-    align-items: end;
+  .field-hint {
+    color: var(--ss-muted);
+    font-size: 0.78rem;
+    font-weight: 500;
   }
 
-  .shortlink-manual-action {
-    display: flex;
-    align-items: flex-end;
-    padding-bottom: 2px;
+  #shortlink-path[readonly] {
+    background: #f1f5f9;
+    color: #475569;
   }
 
   /* --- 03 Post ---------------------------------------------------------------- */

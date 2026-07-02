@@ -19,6 +19,12 @@ export type RealtorCaptureResult = {
   warnings: string[];
 };
 
+export type RealtorPhotosResult = {
+  ok: boolean;
+  saved: number;
+  warnings: string[];
+};
+
 // A modern desktop Chrome UA. The headless UA contains "HeadlessChrome", which
 // bot protection flags — override it so the automated session reads as a normal
 // desktop browser.
@@ -238,4 +244,276 @@ export async function captureRealtorStats(
       (warnings.length ? `, warnings: ${warnings.join(" | ")}` : "")
   );
   return { ok: captured.length > 0, captured, warnings };
+}
+
+// Shared browser launch used by both captures: same executable, args (incl. the
+// AutomationControlled flag), UA and viewport. Kept tiny on purpose — the two
+// captures diverge entirely after this, so only the launch is factored out.
+async function launchBrowser(): Promise<import("puppeteer-core").Browser> {
+  const executablePath = browserPath();
+  if (!executablePath) {
+    // Caller checks browserPath() first; this guard keeps the helper honest.
+    throw new Error("no-browser");
+  }
+  return puppeteer.launch({
+    executablePath,
+    headless: true,
+    args: [...BROWSER_ARGS, "--disable-blink-features=AutomationControlled"]
+  });
+}
+
+const MAX_PHOTOS = 10;
+
+// cdn.realtor.ca serves listing photos under sized path segments
+// (…/listings/<lowres|medres|highres>/…). Rewrite a thumb URL to the largest
+// variant so the post album gets full-resolution photos, not gallery thumbs.
+function toHighRes(url: string): string {
+  return url.replace(/\/(?:lowres|medres|lowres_1|reduced|thumbnail)\//i, "/highres/");
+}
+
+/**
+ * Fetch the first 10 listing photos for a request from REALTOR.ca and store them
+ * as `post_photo` assets. Sequence: the member.realtor.ca stats share page →
+ * its "View on REALTOR.ca" button → the public listing → its photo gallery.
+ *
+ * Never throws (adapter contract): any failure returns ok:false + a specific
+ * human warning so the manual drag-drop upload stays the fallback. Partial
+ * success is valuable — a photo that fails to download just warns and the loop
+ * continues, and ok is true as soon as at least one photo is saved.
+ */
+export async function captureRealtorPhotos(
+  requestId: string,
+  statsUrl: string
+): Promise<RealtorPhotosResult> {
+  const warnings: string[] = [];
+  let saved = 0;
+
+  if (!isHttpUrl(statsUrl)) {
+    return { ok: false, saved, warnings: ["The REALTOR.ca stats link is not a valid http(s) URL."] };
+  }
+
+  if (!browserPath()) {
+    return {
+      ok: false,
+      saved,
+      warnings: ["REALTOR.ca photo fetch needs Chrome, Edge, or CHROME_PATH set. Upload the photos manually."]
+    };
+  }
+
+  let browser: import("puppeteer-core").Browser | undefined;
+  try {
+    browser = await launchBrowser();
+    const page = await browser.newPage();
+    await page.setUserAgent(DESKTOP_UA);
+    await page.setViewport({ width: 1440, height: 1000, deviceScaleFactor: 1 });
+
+    console.log(`[realtorCapture] ${requestId}: opening stats page ${statsUrl}`);
+    await page.goto(statsUrl, { waitUntil: "networkidle2", timeout: 30_000 });
+    console.log(`[realtorCapture] ${requestId}: stats loaded ${page.url()} ("${(await page.title()).slice(0, 80)}")`);
+    await dismissConsent(page);
+
+    // The stats page must show the "View on REALTOR.ca" button — that's the only
+    // hop to the public listing. Missing → precise fail-fast (the client pasted
+    // the wrong link, or the page shape changed).
+    try {
+      await page.waitForSelector("#img_reportRight_viewOnRealtorIcon", { timeout: 12_000 });
+    } catch {
+      return {
+        ok: false,
+        saved,
+        warnings: ["The stats page didn't show the View-on-REALTOR.ca button — fetch photos manually."]
+      };
+    }
+
+    // Prefer the plain href (simplest, most robust): the icon sits inside an
+    // <a> pointing at the public listing. If we can read it, navigate directly
+    // and skip the click/new-tab dance entirely.
+    const listingHref = await page.evaluate(() => {
+      const icon = document.getElementById("img_reportRight_viewOnRealtorIcon");
+      const anchor = icon?.closest("a") as HTMLAnchorElement | null;
+      return anchor?.href || "";
+    });
+
+    let listingPage = page;
+    if (listingHref && isHttpUrl(listingHref)) {
+      console.log(`[realtorCapture] ${requestId}: following listing href ${listingHref}`);
+      await page.goto(listingHref, { waitUntil: "networkidle2", timeout: 30_000 });
+    } else {
+      // No readable href — click and handle either an in-tab navigation or a new
+      // tab. Race the two outcomes; whichever wins, continue on a realtor.ca page.
+      console.log(`[realtorCapture] ${requestId}: no href; clicking the View-on-REALTOR.ca button`);
+      const newTab = new Promise<import("puppeteer-core").Page | null>((resolve) => {
+        const onTarget = async (target: import("puppeteer-core").Target) => {
+          try {
+            const opened = await target.page();
+            if (opened) resolve(opened);
+          } catch {
+            resolve(null);
+          }
+        };
+        browser!.once("targetcreated", onTarget);
+        setTimeout(() => resolve(null), 20_000);
+      });
+      const sameTabNav = page
+        .waitForNavigation({ waitUntil: "networkidle2", timeout: 20_000 })
+        .then(() => page)
+        .catch(() => null);
+      await page.evaluate(() => {
+        const icon = document.getElementById("img_reportRight_viewOnRealtorIcon");
+        (icon?.closest("a") ?? icon)?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      });
+      const opened = await Promise.race([newTab, sameTabNav]);
+      if (opened) listingPage = opened;
+      await listingPage.bringToFront().catch(() => {});
+    }
+
+    console.log(
+      `[realtorCapture] ${requestId}: listing page ${listingPage.url()} ("${(await listingPage.title().catch(() => "")).slice(0, 80)}")`
+    );
+    // The public listing may show its own cookie/consent banner.
+    await dismissConsent(listingPage);
+
+    // The gallery opens from #btnPhotoCount. Wait for it — its absence within 15s
+    // means either the listing didn't load or (more likely) public REALTOR.ca's
+    // bot wall served a challenge/blocked page instead of the listing.
+    try {
+      await listingPage.waitForSelector("#btnPhotoCount", { timeout: 15_000 });
+    } catch {
+      const host = (() => {
+        try {
+          return new URL(listingPage.url()).hostname;
+        } catch {
+          return "realtor.ca";
+        }
+      })();
+      console.warn(`[realtorCapture] ${requestId}: no #btnPhotoCount at ${listingPage.url()}`);
+      return {
+        ok: false,
+        saved,
+        warnings: [
+          `Couldn't open the REALTOR.ca photo gallery (${host}) — the listing page may be blocked by bot ` +
+            `protection. Fetch photos manually.`
+        ]
+      };
+    }
+
+    await listingPage.click("#btnPhotoCount").catch(() => {});
+    // Wait for the gallery modal's photos to render (it mounts async), then a
+    // short settle. The modal (#ImageGalleryModal) fills with the listing's
+    // cdn.realtor.ca/listings/… images.
+    await listingPage
+      .waitForFunction(
+        () => document.querySelectorAll("img[src*='cdn.realtor.ca/listings/']").length > 0,
+        { timeout: 12_000 }
+      )
+      .catch(() => {});
+    await new Promise((resolve) => setTimeout(resolve, 1500));
+
+    // Collect the first photo URLs in DISPLAY ORDER, deduped. The gallery renders
+    // each photo several times (top grid, sidebar thumbs, list view, grid view),
+    // so first-occurrence order is the listing's photo order. Listing photos are
+    // the only images served from cdn.realtor.ca/listings/ — icons live on
+    // static.realtor.ca and the agent headshot on cdn.realtor.ca/individuals/,
+    // so this host+path filter is exact. Data-src/background-image are collected
+    // too as a tolerant fallback for a future lazy-loaded gallery variant.
+    const urls: string[] = await listingPage.evaluate((cap: number) => {
+      const out: string[] = [];
+      const seen = new Set<string>();
+      const isListingPhoto = (u: string) => /cdn\.realtor\.ca\/listings\//i.test(u);
+      const push = (raw: string | null | undefined) => {
+        if (!raw) return;
+        const u = raw.trim();
+        if (!u || !isListingPhoto(u) || seen.has(u)) return;
+        seen.add(u);
+        out.push(u);
+      };
+      for (const img of Array.from(document.querySelectorAll<HTMLImageElement>("img"))) {
+        push(img.getAttribute("src"));
+        push(img.currentSrc);
+        push(img.getAttribute("data-src"));
+      }
+      for (const el of Array.from(document.querySelectorAll<HTMLElement>("[style*='background-image']"))) {
+        const match = /url\(["']?([^"')]+)["']?\)/i.exec(el.style.backgroundImage || "");
+        if (match) push(match[1]);
+      }
+      return out.slice(0, cap);
+    }, MAX_PHOTOS);
+
+    if (urls.length === 0) {
+      return {
+        ok: false,
+        saved,
+        warnings: ["Opened the REALTOR.ca gallery but found no photos to download — fetch photos manually."]
+      };
+    }
+    console.log(`[realtorCapture] ${requestId}: found ${urls.length} gallery photo URL(s)`);
+
+    // Download each photo on a dedicated page in the same browser (shares the
+    // session/cookies). An in-page fetch() is blocked by realtor.ca's CSP
+    // (connect-src), so a top-level navigation to the image URL is what works:
+    // page.goto → response.buffer() returns the raw JPEG bytes. Try the highres
+    // variant first, fall back to the original on failure or the 4MB cap; a photo
+    // that fails both just warns and the loop continues.
+    const downloader = await browser.newPage();
+    await downloader.setUserAgent(DESKTOP_UA);
+    // The listing page already loaded these images, so they sit in the HTTP
+    // cache — without this the downloader's navigation gets a 304 (no body) and
+    // every photo is skipped. Disable the cache to force a fresh 200 with bytes.
+    await downloader.setCacheEnabled(false);
+    try {
+      for (let i = 0; i < urls.length && saved < MAX_PHOTOS; i++) {
+        const original = urls[i];
+        const candidates = [toHighRes(original), original].filter((u, idx, arr) => arr.indexOf(u) === idx);
+        let ok = false;
+        for (const candidate of candidates) {
+          let buffer: Buffer | undefined;
+          try {
+            const response = await downloader.goto(candidate, {
+              waitUntil: "domcontentloaded",
+              timeout: 20_000
+            });
+            if (response && response.ok()) {
+              const contentType = response.headers()["content-type"] ?? "";
+              if (contentType.startsWith("image/")) buffer = await response.buffer();
+            }
+          } catch {
+            buffer = undefined;
+          }
+          if (!buffer || buffer.byteLength === 0) continue;
+          try {
+            await saveUpload(requestId, "post_photo", buffer, `realtor-photo-${i + 1}.jpg`);
+            saved++;
+            ok = true;
+            console.log(
+              `[realtorCapture] ${requestId}: saved photo ${i + 1} (${Math.round(buffer.byteLength / 1024)} KB)` +
+                (candidate === original ? "" : " [highres]")
+            );
+            break;
+          } catch (error) {
+            // Most likely the 4MB post_photo cap on a big highres — fall through
+            // to the smaller original variant on the next loop iteration.
+            console.warn(`[realtorCapture] ${requestId}: photo ${i + 1} rejected (${candidate}):`, error);
+          }
+        }
+        if (!ok) warnings.push(`Photo ${i + 1} couldn't be downloaded from REALTOR.ca — add it manually.`);
+      }
+    } finally {
+      await downloader.close().catch(() => {});
+    }
+  } catch (error) {
+    console.warn("[realtorCapture] photo fetch failed:", error);
+    return {
+      ok: saved > 0,
+      saved,
+      warnings: [...warnings, "REALTOR.ca blocked the automated photo fetch — upload the photos manually."]
+    };
+  } finally {
+    await browser?.close();
+  }
+
+  console.log(
+    `[realtorCapture] ${requestId}: done — saved ${saved} photo(s)` +
+      (warnings.length ? `, warnings: ${warnings.join(" | ")}` : "")
+  );
+  return { ok: saved > 0, saved, warnings };
 }

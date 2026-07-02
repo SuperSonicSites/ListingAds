@@ -1,12 +1,8 @@
 import type { APIRoute } from "astro";
 import { isAdmin } from "../../../../lib/auth";
-import { json } from "../../../../lib/http";
-import { readRequest } from "../../../../lib/storage";
-import {
-  fetchAdCreative,
-  fetchCampaignInsights,
-  fetchInsightsBreakdowns
-} from "../../../../lib/metaAds";
+import { isHttpUrl, json } from "../../../../lib/http";
+import { readRequest, writeRequest } from "../../../../lib/storage";
+import { fetchAdCreative, fetchCampaignInsights } from "../../../../lib/metaAds";
 import { captureRealtorStats } from "../../../../lib/realtorCapture";
 
 export const prerender = false;
@@ -30,9 +26,11 @@ export const POST: APIRoute = async ({ params, request }) => {
   }
 
   let mode = "";
+  let statsLink = "";
   try {
     const body = await request.json();
     mode = String(body?.mode ?? "");
+    statsLink = typeof body?.stats_link === "string" ? body.stats_link.trim() : "";
   } catch {
     return json(400, { error: "Invalid JSON body." });
   }
@@ -46,11 +44,12 @@ export const POST: APIRoute = async ({ params, request }) => {
         error: "Set the Ad Launch Date and Report Due Date on the request page first."
       });
     }
-    const [insights, breakdowns] = await Promise.all([
-      fetchCampaignInsights(adRequest.fb_campaign_id, adRequest.ad_launch_date, adRequest.report_due_date),
-      fetchInsightsBreakdowns(adRequest.fb_campaign_id, adRequest.ad_launch_date, adRequest.report_due_date)
-    ]);
-    return json(200, { insights, breakdowns });
+    const insights = await fetchCampaignInsights(
+      adRequest.fb_campaign_id,
+      adRequest.ad_launch_date,
+      adRequest.report_due_date
+    );
+    return json(200, { insights });
   }
 
   if (mode === "creative") {
@@ -62,6 +61,19 @@ export const POST: APIRoute = async ({ params, request }) => {
   }
 
   if (mode === "realtor") {
+    // The builder can send an edited stats_link to correct a client's bad link.
+    // When present, validate it, save it to the request (fresh read → set →
+    // write) BEFORE capturing, then capture with it. Absent → the stored link.
+    if (statsLink) {
+      if (!isHttpUrl(statsLink)) {
+        return json(400, { error: "The REALTOR.ca stats link must be a valid http(s) URL." });
+      }
+      const fresh = await readRequest(requestId);
+      fresh.realtor_stats_link = statsLink;
+      await writeRequest(fresh);
+      const result = await captureRealtorStats(requestId, statsLink);
+      return json(200, result);
+    }
     if (!adRequest.realtor_stats_link) {
       return json(400, { error: "This request has no REALTOR.ca stats link. Upload the screenshots manually." });
     }

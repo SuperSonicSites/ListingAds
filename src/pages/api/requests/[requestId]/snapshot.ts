@@ -13,7 +13,7 @@ import { embedAsset, embedRemoteImage, findAsset } from "../../../../lib/uploads
 import { statusIndex } from "../../../../lib/status";
 import { sendAndLog } from "../../../../lib/email";
 import { reportReadyInternal } from "../../../../lib/emailTemplates";
-import type { AdRequest, BreakdownRow, ExecReportSnapshot, InsightsSource } from "../../../../lib/types";
+import type { AdRequest, ExecReportSnapshot, InsightsSource } from "../../../../lib/types";
 
 export const prerender = false;
 
@@ -21,8 +21,6 @@ export const prerender = false;
 // data URI at this moment (snapshot invariant: reports render only from frozen
 // bytes, never from files or records that may later change). Regeneration
 // mints a NEW snapshot id; the request points at the latest.
-
-const MAX_BREAKDOWN_ROWS = 50;
 
 // Invalid input must be rejected, not silently frozen as 0 in a client-facing PDF.
 function numberField(form: FormData, name: string): number | null {
@@ -45,32 +43,6 @@ function errorPage(status: number, message: string, backHref: string) {
   return sharedErrorPage(status, "Report not generated", `<p>${message}</p>
 <p>Use your browser's <strong>Back</strong> button to return to the builder — your entries are preserved there.</p>
 <p><a href="${backHref}">Or reopen the report builder</a>.</p>`);
-}
-
-function coerceNumber(value: unknown): number {
-  const parsed = Number(value);
-  return Number.isFinite(parsed) && parsed >= 0 ? Math.round(parsed) : 0;
-}
-
-// Breakdown rows arrive as JSON serialized from the builder's editable tables.
-// Anything malformed degrades to [] — the report simply omits the tables.
-function parseBreakdownJson(raw: string): BreakdownRow[] {
-  if (!raw) return [];
-  try {
-    const parsed = JSON.parse(raw);
-    if (!Array.isArray(parsed)) return [];
-    return parsed
-      .map((row: any): BreakdownRow => ({
-        key: String(row?.key ?? "").trim().slice(0, 80),
-        impressions: coerceNumber(row?.impressions),
-        reach: coerceNumber(row?.reach),
-        clicks: coerceNumber(row?.clicks)
-      }))
-      .filter((row) => row.key)
-      .slice(0, MAX_BREAKDOWN_ROWS);
-  } catch {
-    return [];
-  }
 }
 
 function singleAssetId(request: AdRequest, kind: string): string | undefined {
@@ -158,8 +130,6 @@ export const POST: APIRoute = async ({ params, request }) => {
     return errorPage(400, "The brokerage record for this request could not be read.", backHref);
   }
 
-  const insightsScreens = adRequest.assets.filter((asset) => asset.kind === "insights_screenshot");
-
   // Sample Overview: the reviewed caption (or the published post text as the
   // manual-fallback) + up to 4 photos. Fetched fbcdn/cdninstagram URLs are
   // frozen as data URIs; if none survive, the published post's own photos (up to
@@ -212,10 +182,7 @@ export const POST: APIRoute = async ({ params, request }) => {
       source: sourceField(form, "insights_source"),
       impressions,
       reach,
-      clicks_all: clicksAll,
-      region: parseBreakdownJson(field(form, "region_json")),
-      age_gender: parseBreakdownJson(field(form, "age_gender_json")),
-      warnings: []
+      clicks_all: clicksAll
     },
     ad_sample: {
       text: sampleText,
@@ -228,10 +195,7 @@ export const POST: APIRoute = async ({ params, request }) => {
       ad_preview_desktop: previewDesktopId ? await embedAsset(adRequest, previewDesktopId) : "",
       realtor_7: await embedAsset(adRequest, realtor7Id),
       realtor_30: await embedAsset(adRequest, realtor30Id),
-      realtor_90: await embedAsset(adRequest, realtor90Id),
-      insights_screens: (
-        await Promise.all(insightsScreens.map((asset) => embedAsset(adRequest, asset.id)))
-      ).filter(Boolean)
+      realtor_90: await embedAsset(adRequest, realtor90Id)
     }
   };
 

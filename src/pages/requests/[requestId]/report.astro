@@ -44,7 +44,6 @@ const realtorSlots = [
 const anyRealtorMissing = realtorSlots.some((slot) => !slot.entry);
 const anyRealtorCaptured = realtorSlots.some((slot) => slot.entry);
 const realtorStatsLink = request?.realtor_stats_link ?? "";
-const insightsShots = assets.filter((asset) => asset.kind === "insights_screenshot");
 
 const earlyStatus =
   request !== undefined && statusIndex(request.status) < statusIndex("campaign_in_progress");
@@ -98,8 +97,6 @@ const title = request ? `Report builder — ${request.listing_address}` : "Reque
         data-request-id={request.id}
       >
         <input type="hidden" name="insights_source" id="insights_source" value="manual" />
-        <input type="hidden" name="region_json" id="region_json" value="" />
-        <input type="hidden" name="age_gender_json" id="age_gender_json" value="" />
         <input type="hidden" name="hero_id" id="hero_id" value="" />
         <input type="hidden" name="gallery_ids" id="gallery_ids" value="" />
         <input type="hidden" name="ad_sample_image_urls" id="ad_sample_image_urls" value="" />
@@ -149,27 +146,6 @@ const title = request ? `Report builder — ${request.listing_address}` : "Reque
               </label>
             </div>
 
-            <div class="break-block">
-              <div class="break-head">
-                <strong>Region breakdown</strong>
-                <button type="button" class="button secondary sm" data-add-row="region">Add row</button>
-              </div>
-              <div class="break-cols">
-                <span>Region</span><span>Impressions</span><span>Reach</span><span>Clicks</span><span></span>
-              </div>
-              <div class="break-rows" data-table="region"></div>
-            </div>
-
-            <div class="break-block">
-              <div class="break-head">
-                <strong>Age &amp; gender breakdown</strong>
-                <button type="button" class="button secondary sm" data-add-row="age">Add row</button>
-              </div>
-              <div class="break-cols">
-                <span>Age &amp; gender</span><span>Impressions</span><span>Reach</span><span>Clicks</span><span></span>
-              </div>
-              <div class="break-rows" data-table="age"></div>
-            </div>
           </div>
         </section>
 
@@ -314,23 +290,31 @@ const title = request ? `Report builder — ${request.listing_address}` : "Reque
                 <span></span>
                 <div>
                   <strong>REALTOR.ca listing stats</strong>
-                  <small>
-                    {realtorStatsLink
-                      ? "Screenshots the 7 / 30 / 90-day graphs from the client's share link."
-                      : "No REALTOR.ca stats link on this request."}
-                  </small>
+                  <small>Screenshots the 7 / 30 / 90-day graphs from the client's share link.</small>
                 </div>
               </div>
               <button
                 type="button"
                 class="client-pull-button"
                 id="fetch-realtor"
-                data-has-link={realtorStatsLink ? "1" : ""}
                 disabled={!realtorStatsLink}
               >
                 {anyRealtorCaptured ? "Re-fetch from REALTOR.ca" : "Fetch from REALTOR.ca"}
               </button>
             </div>
+            <label class="client-field wide realtor-link-field">
+              <span>REALTOR.ca stats link</span>
+              <input
+                type="url"
+                id="realtor-stats-link"
+                value={realtorStatsLink}
+                placeholder="https://member.realtor.ca/Reports/…"
+              />
+              <small class="field-note">
+                Correct a client's bad link before fetching — the Fetch button uses whatever's here (and
+                saves it to the request).
+              </small>
+            </label>
             <div id="realtor-warnings"></div>
 
             <div class="preview-grid realtor-grid">
@@ -350,20 +334,6 @@ const title = request ? `Report builder — ${request.listing_address}` : "Reque
               ))}
             </div>
 
-            <div class="insights-extra">
-              <strong>Ads Manager screenshots (optional, adds In-Depth Data pages)</strong>
-              {insightsShots.length > 0 && (
-                <div class="insights-thumbs">
-                  {insightsShots.map((asset) => (
-                    <img class="slot-thumb" src={assetUrl(asset)} alt={asset.original_name} loading="lazy" />
-                  ))}
-                </div>
-              )}
-              <label class="slot-file">
-                Upload files
-                <input type="file" accept="image/jpeg,image/png,image/webp" data-upload-kind="insights_screenshot" multiple />
-              </label>
-            </div>
           </div>
         </section>
 
@@ -453,8 +423,6 @@ const title = request ? `Report builder — ${request.listing_address}` : "Reque
     const reach = document.getElementById("reach") as HTMLInputElement;
     const clicksAll = document.getElementById("clicks_all") as HTMLInputElement;
     const insightsSource = document.getElementById("insights_source") as HTMLInputElement;
-    const regionJson = document.getElementById("region_json") as HTMLInputElement;
-    const ageJson = document.getElementById("age_gender_json") as HTMLInputElement;
     const heroInput = document.getElementById("hero_id") as HTMLInputElement;
     const galleryInput = document.getElementById("gallery_ids") as HTMLInputElement;
     const sourceBadge = document.getElementById("stats-source") as HTMLElement;
@@ -466,10 +434,6 @@ const title = request ? `Report builder — ${request.listing_address}` : "Reque
     const creativeThumbs = document.getElementById("creative-thumbs") as HTMLElement;
     const creativeThumbsEmpty = document.getElementById("creative-thumbs-empty") as HTMLElement;
     const pickSummary = document.getElementById("pick-summary") as HTMLElement;
-    const regionTable = document.querySelector('[data-table="region"]') as HTMLElement;
-    const ageTable = document.querySelector('[data-table="age"]') as HTMLElement;
-
-    type Row = { key: string; impressions: number; reach: number; clicks: number };
 
     const sourceLabel = (source: string) =>
       source === "meta_api" ? "Meta API" : source === "mock" ? "Mock" : "Manual";
@@ -501,64 +465,6 @@ const title = request ? `Report builder — ${request.listing_address}` : "Reque
       }
       creativeThumbsEmpty.hidden = urls.length > 0;
     }
-
-    // --- Breakdown tables -------------------------------------------------
-    function addRow(table: HTMLElement, row?: Partial<Row>) {
-      const wrap = document.createElement("div");
-      wrap.className = "break-row";
-      const key = document.createElement("input");
-      key.type = "text";
-      key.className = "bk";
-      key.placeholder = table === regionTable ? "e.g. Whitehorse, Yukon" : "e.g. 35-44 · female";
-      key.value = row?.key ?? "";
-      wrap.appendChild(key);
-      for (const [cls, value] of [
-        ["bi", row?.impressions],
-        ["br", row?.reach],
-        ["bc", row?.clicks]
-      ] as const) {
-        const input = document.createElement("input");
-        input.type = "number";
-        input.min = "0";
-        input.step = "1";
-        input.className = cls;
-        input.value = value === undefined || value === null ? "" : String(value);
-        wrap.appendChild(input);
-      }
-      const remove = document.createElement("button");
-      remove.type = "button";
-      remove.className = "row-remove";
-      remove.setAttribute("aria-label", "Remove row");
-      remove.textContent = "×";
-      remove.addEventListener("click", () => {
-        wrap.remove();
-        saveState();
-      });
-      wrap.appendChild(remove);
-      table.appendChild(wrap);
-    }
-
-    function readRows(table: HTMLElement): Row[] {
-      return Array.from(table.querySelectorAll(".break-row"))
-        .map((row) => ({
-          key: (row.querySelector(".bk") as HTMLInputElement).value.trim(),
-          impressions: Number((row.querySelector(".bi") as HTMLInputElement).value) || 0,
-          reach: Number((row.querySelector(".br") as HTMLInputElement).value) || 0,
-          clicks: Number((row.querySelector(".bc") as HTMLInputElement).value) || 0
-        }))
-        .filter((row) => row.key);
-    }
-
-    function setRows(table: HTMLElement, rows: Row[]) {
-      table.innerHTML = "";
-      for (const row of rows) addRow(table, row);
-    }
-
-    document.querySelectorAll("[data-add-row]").forEach((button) => {
-      button.addEventListener("click", () => {
-        addRow(button.getAttribute("data-add-row") === "region" ? regionTable : ageTable);
-      });
-    });
 
     // --- Hero / gallery picking -------------------------------------------
     let heroId = "";
@@ -616,8 +522,6 @@ const title = request ? `Report builder — ${request.listing_address}` : "Reque
         clicks: clicksAll.value,
         source: insightsSource.value,
         badge: sourceBadge.textContent,
-        region: readRows(regionTable),
-        age: readRows(ageTable),
         hero: heroId,
         gallery: galleryIds,
         ad_sample_text: adSampleText.value,
@@ -651,8 +555,6 @@ const title = request ? `Report builder — ${request.listing_address}` : "Reque
         if (state.clicks) clicksAll.value = state.clicks;
         if (state.source) insightsSource.value = state.source;
         if (state.badge) sourceBadge.textContent = state.badge;
-        if (Array.isArray(state.region)) setRows(regionTable, state.region);
-        if (Array.isArray(state.age)) setRows(ageTable, state.age);
         if (typeof state.ad_sample_text === "string") adSampleText.value = state.ad_sample_text;
         if (typeof state.ad_sample_image_urls === "string") {
           adSampleUrls.value = state.ad_sample_image_urls;
@@ -801,15 +703,12 @@ const title = request ? `Report builder — ${request.listing_address}` : "Reque
           return;
         }
         const insights = data.insights ?? {};
-        const breakdowns = data.breakdowns ?? {};
         impressions.value = String(insights.impressions ?? 0);
         reach.value = String(insights.reach ?? 0);
         clicksAll.value = String(insights.clicks_all ?? 0);
         insightsSource.value = insights.source ?? "manual";
         sourceBadge.textContent = sourceLabel(insights.source ?? "manual");
-        setRows(regionTable, Array.isArray(breakdowns.region) ? breakdowns.region : []);
-        setRows(ageTable, Array.isArray(breakdowns.age_gender) ? breakdowns.age_gender : []);
-        renderWarnings(statsWarnings, [insights.warning, breakdowns.warning].filter(Boolean));
+        renderWarnings(statsWarnings, [insights.warning].filter(Boolean));
         saveState();
       } catch {
         renderWarnings(statsWarnings, ["Pull failed — check the connection and try again."]);
@@ -858,7 +757,17 @@ const title = request ? `Report builder — ${request.listing_address}` : "Reque
     // --- Fetch REALTOR.ca stats ----------------------------------------------
     const realtorButton = document.getElementById("fetch-realtor") as HTMLButtonElement | null;
     const realtorWarnings = document.getElementById("realtor-warnings") as HTMLElement | null;
-    if (realtorButton?.dataset.hasLink) {
+    const realtorLink = document.getElementById("realtor-stats-link") as HTMLInputElement | null;
+    // Fetch stays disabled until there's a link to send; the team can paste/fix
+    // one to correct a client's bad link (the API saves it to the request).
+    if (realtorLink) {
+      const syncRealtorButton = () => {
+        if (realtorButton) realtorButton.disabled = !realtorLink.value.trim();
+      };
+      realtorLink.addEventListener("input", syncRealtorButton);
+      syncRealtorButton();
+    }
+    if (realtorButton) {
       realtorButton.addEventListener("click", async () => {
         realtorButton.disabled = true;
         const label = realtorButton.textContent;
@@ -867,7 +776,7 @@ const title = request ? `Report builder — ${request.listing_address}` : "Reque
           const response = await fetch(`/api/requests/${requestId}/pull-report`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ mode: "realtor" })
+            body: JSON.stringify({ mode: "realtor", stats_link: realtorLink?.value.trim() ?? "" })
           });
           const data = await response.json();
           if (!response.ok) {
@@ -890,7 +799,9 @@ const title = request ? `Report builder — ${request.listing_address}` : "Reque
         } catch {
           if (realtorWarnings) renderWarnings(realtorWarnings, ["Fetch failed — check the connection and try again."]);
         } finally {
-          realtorButton.disabled = false;
+          // Re-enable only if the link input still has a value (keep the
+          // disabled-when-empty invariant).
+          realtorButton.disabled = !(realtorLink?.value.trim());
           if (realtorButton.textContent === "Fetching…") realtorButton.textContent = label;
         }
       });
@@ -898,8 +809,6 @@ const title = request ? `Report builder — ${request.listing_address}` : "Reque
 
     // --- Submit ---------------------------------------------------------------
     form.addEventListener("submit", (event) => {
-      regionJson.value = JSON.stringify(readRows(regionTable));
-      ageJson.value = JSON.stringify(readRows(ageTable));
       if (!heroInput.value) {
         event.preventDefault();
         alert("Pick a HERO photo in section 03 first.");
@@ -934,80 +843,6 @@ const title = request ? `Report builder — ${request.listing_address}` : "Reque
     font-size: 0.76rem;
     font-weight: 500;
     line-height: 1.5;
-  }
-
-  /* Breakdown row editors */
-  .break-block {
-    display: grid;
-    gap: 8px;
-    border-top: 1px solid var(--ss-border);
-    padding-top: 16px;
-  }
-
-  .break-head {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 12px;
-  }
-
-  .break-head strong {
-    color: var(--ss-ink);
-    font-size: 0.9rem;
-    font-weight: 700;
-  }
-
-  .break-cols,
-  .break-block :global(.break-row) {
-    display: grid;
-    grid-template-columns: minmax(0, 1.6fr) repeat(3, minmax(0, 0.8fr)) 34px;
-    gap: 8px;
-    align-items: center;
-  }
-
-  .break-cols span {
-    color: var(--ss-muted);
-    font-size: 0.7rem;
-    font-weight: 700;
-    letter-spacing: 0.05em;
-    text-transform: uppercase;
-  }
-
-  .break-rows {
-    display: grid;
-    gap: 8px;
-  }
-
-  .break-rows:empty::after {
-    content: "No rows yet — pull ad stats or add rows manually.";
-    color: var(--ss-muted);
-    font-size: 0.82rem;
-    font-weight: 500;
-  }
-
-  .break-block :global(.break-row input) {
-    min-height: 38px;
-    padding: 0.4rem 0.6rem;
-    font-size: 0.88rem;
-  }
-
-  .break-block :global(.row-remove) {
-    display: inline-flex;
-    width: 34px;
-    height: 38px;
-    align-items: center;
-    justify-content: center;
-    border: 1px solid var(--ss-border-strong);
-    border-radius: var(--ss-radius-sm);
-    background: var(--ss-surface);
-    color: var(--ss-muted);
-    font-size: 1rem;
-    cursor: pointer;
-  }
-
-  .break-block :global(.row-remove:hover) {
-    border-color: #dc2626;
-    color: #dc2626;
   }
 
   /* Upload slots (previews, realtor) */
@@ -1225,31 +1060,6 @@ const title = request ? `Report builder — ${request.listing_address}` : "Reque
     font-weight: 600;
   }
 
-  .insights-extra {
-    display: grid;
-    justify-items: start;
-    gap: 8px;
-    border-top: 1px solid var(--ss-border);
-    padding-top: 16px;
-  }
-
-  .insights-extra > strong {
-    color: var(--ss-ink);
-    font-size: 0.86rem;
-    font-weight: 700;
-  }
-
-  .insights-thumbs {
-    display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
-    gap: 10px;
-    width: 100%;
-  }
-
-  .insights-thumbs .slot-thumb {
-    max-height: 120px;
-  }
-
   /* Submit panel */
   .submit-stack {
     align-items: center;
@@ -1275,11 +1085,6 @@ const title = request ? `Report builder — ${request.listing_address}` : "Reque
 
     .preview-grid {
       grid-template-columns: 1fr;
-    }
-
-    .break-cols,
-    .break-block :global(.break-row) {
-      grid-template-columns: minmax(0, 1.2fr) repeat(3, minmax(0, 0.9fr)) 34px;
     }
   }
 

@@ -6,19 +6,22 @@ import { readRequest, writeRequest } from "../../../../lib/storage";
 
 export const prerender = false;
 
-// Creates the branded short link ON CLICK (never automatically), or records a
-// hand-made one pasted into the manual field. A short.io failure (path taken,
-// API unreachable) redirects back with ?warning= so the form stays usable —
-// only malformed input gets an error page.
+// Creates the branded short link ON CLICK (never automatically). House
+// convention (verified against the live nowforsale.co links): the path is
+// mls{MLS® number} and the destination is the brokerage-site listing page with
+// the fixed Meta UTM tags appended. A short.io failure (path taken, API
+// unreachable) redirects back with ?warning= so the form stays usable — only
+// malformed input gets an error page.
 
-const PATH_RE = /^[a-z0-9-]{3,40}$/;
+const MLS_RE = /^\d{3,10}$/;
+// The fixed campaign tags on every ad destination.
+const UTM = "utm_source=meta&utm_medium=ppc&utm_campaign=supersonicrealtors";
 
 function errorPage(status: number, message: string, backHref?: string) {
   const back = backHref
     ? `<p><a href="${backHref}">Return to the request</a>, or use your browser's <strong>Back</strong> button — your entries are preserved there.</p>`
     : `<p>Use your browser's <strong>Back</strong> button to return to the form — your entries are preserved there.</p>`;
-  return sharedErrorPage(status, "Short link not saved", `<p>${message}</p>
-${back}`);
+  return sharedErrorPage(status, "Short link not saved", `<p>${message}</p>\n${back}`);
 }
 
 export const POST: APIRoute = async ({ params, request }) => {
@@ -38,35 +41,29 @@ export const POST: APIRoute = async ({ params, request }) => {
 
   const form = await request.formData();
 
-  // Manual fallback: paste an existing short link and record it verbatim.
-  const manualUrl = field(form, "manual_url");
-  if (manualUrl) {
-    if (!isHttpUrl(manualUrl)) {
-      return errorPage(400, "The pasted short link must be an http(s) URL.", detailHref);
-    }
-    const segments = new URL(manualUrl).pathname.split("/").filter(Boolean);
-    const fresh = await readRequest(requestId).catch(() => record);
-    fresh.short_link = { url: manualUrl, path: segments[segments.length - 1] ?? "" };
-    await writeRequest(fresh);
-    return redirect(`${detailHref}#card-shortlink`);
+  const mls = field(form, "mls_number").replace(/\D/g, "");
+  if (!MLS_RE.test(mls)) {
+    return errorPage(400, "Enter the listing's MLS® number (3–10 digits) — it becomes the /mls… path.", detailHref);
   }
+  const path = `mls${mls}`;
 
-  const path = field(form, "path");
-  const originalUrl = field(form, "original_url");
-  if (!PATH_RE.test(path)) {
-    return errorPage(
-      400,
-      "The short link path must be 3–40 characters using lowercase letters, numbers, and hyphens (e.g. mls17354).",
-      detailHref
-    );
-  }
+  let originalUrl = field(form, "original_url");
   if (!isHttpUrl(originalUrl)) {
     return errorPage(400, "The destination URL must start with http:// or https://.", detailHref);
+  }
+  // The form prefills "{website}/listing/" — submitting it unfinished (or the
+  // bare site root) would ship an ad pointing at nothing.
+  const destinationPath = new URL(originalUrl).pathname.replace(/\/+$/, "");
+  if (destinationPath === "" || destinationPath === "/listing") {
+    return errorPage(400, "Complete the destination with the actual listing page on the brokerage site.", detailHref);
+  }
+  if (!/[?&]utm_/.test(originalUrl)) {
+    originalUrl += (originalUrl.includes("?") ? "&" : "?") + UTM;
   }
 
   const result = await createShortLink(path, originalUrl, record.listing_address);
   if (!result.ok || !result.short_url) {
-    const warning = result.warning ?? "short.io did not return a link. Try again or paste an existing one.";
+    const warning = result.warning ?? "short.io did not return a link. Try again.";
     return redirect(`${detailHref}?warning=${encodeURIComponent(warning)}#card-shortlink`);
   }
 

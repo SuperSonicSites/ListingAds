@@ -1,4 +1,4 @@
-import type { BreakdownRow, InsightsSource } from "./types";
+import type { InsightsSource } from "./types";
 import { GRAPH, demoMode, fetchJson, getPageAccessToken, metaToken } from "./metaCore";
 
 // Marketing API reads for the Executive Report. The team creates the campaign
@@ -12,13 +12,6 @@ export type CampaignInsightsResult = {
   reach: number;
   clicks_all: number; // Meta's `clicks` field: ALL clicks incl. like/engagement clicks
   spend: number;
-  warning?: string;
-};
-
-export type InsightsBreakdownsResult = {
-  source: InsightsSource;
-  region: BreakdownRow[];
-  age_gender: BreakdownRow[];
   warning?: string;
 };
 
@@ -83,78 +76,6 @@ export async function fetchCampaignInsights(
   } catch (error) {
     console.warn(`[metaAds] insights failed for ${campaignId}:`, error);
     return manualInsights("Campaign stats auto-fetch unavailable. Enter the numbers manually.");
-  }
-}
-
-async function fetchBreakdown(
-  campaignId: string,
-  breakdowns: string,
-  since: string,
-  until: string,
-  token: string,
-  keyOf: (row: any) => string
-): Promise<BreakdownRow[]> {
-  const url =
-    `${GRAPH}/${campaignId}/insights?level=campaign` +
-    `&fields=impressions,reach,clicks&breakdowns=${breakdowns}` +
-    `&time_range=${timeRange(since, until)}&limit=50`;
-  const body = await fetchJson(url, token);
-  const rows: any[] = Array.isArray(body?.data) ? body.data : [];
-  return rows
-    .map((row) => ({
-      key: keyOf(row),
-      impressions: num(row.impressions),
-      reach: num(row.reach),
-      clicks: num(row.clicks)
-    }))
-    .filter((row) => row.key)
-    .sort((a, b) => b.impressions - a.impressions);
-}
-
-export async function fetchInsightsBreakdowns(
-  campaignId: string,
-  since: string,
-  until: string
-): Promise<InsightsBreakdownsResult> {
-  const token = metaToken();
-  if (!token) {
-    if (demoMode()) {
-      return {
-        source: "mock",
-        region: [
-          { key: "Whitehorse, Yukon", impressions: 4210, reach: 2483, clicks: 861 },
-          { key: "British Columbia", impressions: 1954, reach: 1201, clicks: 388 },
-          { key: "Alberta", impressions: 768, reach: 470, clicks: 154 }
-        ],
-        age_gender: [
-          { key: "35-44 · female", impressions: 1730, reach: 1044, clicks: 402 },
-          { key: "45-54 · female", impressions: 1418, reach: 852, clicks: 331 },
-          { key: "35-44 · male", impressions: 1339, reach: 809, clicks: 274 },
-          { key: "25-34 · female", impressions: 1122, reach: 688, clicks: 213 },
-          { key: "55-64 · male", impressions: 703, reach: 428, clicks: 108 }
-        ]
-      };
-    }
-    return { source: "manual", region: [], age_gender: [], warning: "Meta token is not configured." };
-  }
-
-  try {
-    // region cannot be combined with age/gender — two separate calls.
-    const [region, ageGender] = await Promise.all([
-      fetchBreakdown(campaignId, "region", since, until, token, (row) => String(row.region ?? "")),
-      fetchBreakdown(campaignId, "age,gender", since, until, token, (row) =>
-        [row.age, row.gender].filter(Boolean).join(" · ")
-      )
-    ]);
-    return { source: "meta_api", region, age_gender: ageGender };
-  } catch (error) {
-    console.warn(`[metaAds] breakdowns failed for ${campaignId}:`, error);
-    return {
-      source: "manual",
-      region: [],
-      age_gender: [],
-      warning: "Breakdown auto-fetch unavailable. Add rows manually or upload Ads Manager screenshots."
-    };
   }
 }
 

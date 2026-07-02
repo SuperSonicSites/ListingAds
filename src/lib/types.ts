@@ -45,8 +45,7 @@ export const ASSET_KINDS = [
   "ad_preview_desktop",
   "realtor_7",
   "realtor_30",
-  "realtor_90",
-  "insights_screenshot"
+  "realtor_90"
 ] as const;
 export type AssetKind = (typeof ASSET_KINDS)[number];
 
@@ -120,7 +119,6 @@ export type AdRequest = {
   ad_budget: AdBudget;
   campaign_type: CampaignType;
   target_cities: string[]; // 1–10, trimmed, deduped
-  photos_link: string; // Dropbox/Drive URL (reference only)
   realtor_stats_link: string;
   special_notes: string;
   // — ops fields filled along the pipeline —
@@ -145,8 +143,6 @@ export type AdRequest = {
 };
 
 export type InsightsSource = "meta_api" | "manual" | "mock";
-
-export type BreakdownRow = { key: string; impressions: number; reach: number; clicks: number };
 
 export type ExecReportSnapshot = {
   request_id: string;
@@ -182,9 +178,6 @@ export type ExecReportSnapshot = {
     impressions: number;
     reach: number;
     clicks_all: number;
-    region: BreakdownRow[];
-    age_gender: BreakdownRow[];
-    warnings: string[];
   };
   // Sample Overview — the ad caption + photos (fetched from the Marketing API or
   // falling back to the published post), rendered as a native Facebook-style
@@ -202,7 +195,6 @@ export type ExecReportSnapshot = {
     realtor_7: string; // "" if waived
     realtor_30: string;
     realtor_90: string;
-    insights_screens: string[]; // optional Ads Manager shots
   };
 };
 

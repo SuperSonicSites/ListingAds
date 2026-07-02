@@ -111,11 +111,6 @@ export const POST: APIRoute = async ({ request }) => {
     return errorPage(400, "Please list at least one town or city to target.", backHref);
   }
 
-  const photosLink = field(form, "photos_link");
-  if (!isHttpUrl(photosLink)) {
-    return errorPage(400, "The photos link must be a valid http(s) URL (Dropbox or Google Drive).", backHref);
-  }
-
   const realtorStatsLink = field(form, "realtor_stats_link");
   if (!isHttpUrl(realtorStatsLink)) {
     return errorPage(400, "The REALTOR.ca stats link must be a valid http(s) URL.", backHref);
@@ -134,7 +129,6 @@ export const POST: APIRoute = async ({ request }) => {
     ad_budget: adBudget,
     campaign_type: campaignType,
     target_cities: cities,
-    photos_link: photosLink,
     realtor_stats_link: realtorStatsLink,
     special_notes: specialNotes,
     post: emptyPostDraft(),
