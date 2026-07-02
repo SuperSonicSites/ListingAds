@@ -66,8 +66,9 @@ export const POST: APIRoute = async ({ params, request }) => {
       return errorPage(400, "The pasted short link must be an http(s) URL.", detailHref);
     }
     const segments = new URL(manualUrl).pathname.split("/").filter(Boolean);
-    record.short_link = { url: manualUrl, path: segments[segments.length - 1] ?? "" };
-    await writeRequest(record);
+    const fresh = await readRequest(requestId).catch(() => record);
+    fresh.short_link = { url: manualUrl, path: segments[segments.length - 1] ?? "" };
+    await writeRequest(fresh);
     return redirect(`${detailHref}#card-shortlink`);
   }
 
@@ -90,12 +91,15 @@ export const POST: APIRoute = async ({ params, request }) => {
     return redirect(`${detailHref}?warning=${encodeURIComponent(warning)}#card-shortlink`);
   }
 
-  record.short_link = {
+  // Re-read after the (up to 8s) short.io call so a concurrent write during
+  // that window — e.g. the reminder tick — isn't clobbered.
+  const fresh = await readRequest(requestId).catch(() => record);
+  fresh.short_link = {
     url: result.short_url,
     path: result.path ?? path,
     ...(result.link_id ? { link_id: result.link_id } : {})
   };
-  await writeRequest(record);
+  await writeRequest(fresh);
 
   return redirect(`${detailHref}#card-shortlink`);
 };

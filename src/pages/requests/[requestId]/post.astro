@@ -30,7 +30,8 @@ const publishApi = `/api/requests/${request.id}/publish-post`;
 const uploadApi = `/api/requests/${request.id}/upload`;
 const uploadsBase = `/api/uploads/${request.id}`;
 
-const canReady = request.status === "new_order";
+const canReady = request.status === "new_order" && request.campaign_type !== "extend";
+const isExtendAtNewOrder = request.status === "new_order" && request.campaign_type === "extend";
 const canPublish = request.status === "post_reviewed" && !published;
 
 const savedFlag = Astro.url.searchParams.get("saved") === "1";
@@ -193,6 +194,14 @@ const publishedDate = published ? formatDate(published.published_at.slice(0, 10)
                 </button>
               )
             }
+            {
+              isExtendAtNewOrder && (
+                <p class="notice grey">
+                  This is an Extend Existing Campaign request — skip straight to Record Ad Launch on the{" "}
+                  <a href={`/requests/${request.id}#card-campaign`}>request page</a>.
+                </p>
+              )
+            }
           </div>
         </form>
 
@@ -264,7 +273,8 @@ const publishedDate = published ? formatDate(published.published_at.slice(0, 10)
     pageName: brokerage.name,
     uploadApi,
     uploadsBase,
-    initialSelection
+    initialSelection,
+    requestId: request.id
   }}
 >
   const form = document.getElementById("post-form");
@@ -287,6 +297,7 @@ const publishedDate = published ? formatDate(published.published_at.slice(0, 10)
   const photoGrid = document.getElementById("photo-grid");
   const publishForm = document.getElementById("publish-form");
   const MAX_PHOTOS = 10;
+  const stateKey = "post-editor-" + requestId;
 
   // --- Caption assembly: line-by-line mirror of lib/postFormat.ts ----------
   function assemble() {
@@ -386,6 +397,67 @@ const publishedDate = published ? formatDate(published.published_at.slice(0, 10)
     });
   }
 
+  // --- State preservation across upload reloads -----------------------------
+  // Mirrors report.astro: persist the in-progress editor before the photo
+  // upload reload, restore on next load, then clear the key.
+  function saveState() {
+    const state = {
+      headline_flag: flagSel ? flagSel.value : "",
+      price_prefix: prefixSel ? prefixSel.value : "",
+      price: priceInput ? priceInput.value : "",
+      beds: bedsInput ? bedsInput.value : "",
+      baths: bathsInput ? bathsInput.value : "",
+      neighborhood: neighInput ? neighInput.value : "",
+      body: bodyTa ? bodyTa.value : "",
+      final_text: finalTa ? finalTa.value : "",
+      dirty: dirtyInput ? dirtyInput.value : "0",
+      photo_ids: selection.slice()
+    };
+    try {
+      sessionStorage.setItem(stateKey, JSON.stringify(state));
+    } catch {
+      /* storage full/blocked — state loss on reload is acceptable */
+    }
+  }
+
+  function restoreState() {
+    let raw = null;
+    try {
+      raw = sessionStorage.getItem(stateKey);
+    } catch {
+      return;
+    }
+    if (!raw) return;
+    try {
+      sessionStorage.removeItem(stateKey);
+    } catch {
+      /* ignore */
+    }
+    let state;
+    try {
+      state = JSON.parse(raw);
+    } catch {
+      return;
+    }
+    if (!state) return;
+    if (flagSel && typeof state.headline_flag === "string") flagSel.value = state.headline_flag;
+    if (prefixSel && typeof state.price_prefix === "string") prefixSel.value = state.price_prefix;
+    if (priceInput && typeof state.price === "string") priceInput.value = state.price;
+    if (bedsInput && typeof state.beds === "string") bedsInput.value = state.beds;
+    if (bathsInput && typeof state.baths === "string") bathsInput.value = state.baths;
+    if (neighInput && typeof state.neighborhood === "string") neighInput.value = state.neighborhood;
+    if (bodyTa && typeof state.body === "string") bodyTa.value = state.body;
+    if (finalTa && typeof state.final_text === "string") finalTa.value = state.final_text;
+    if (dirtyInput && typeof state.dirty === "string") dirtyInput.value = state.dirty;
+    if (Array.isArray(state.photo_ids)) {
+      const valid = new Set(initialSelection.slice());
+      if (photoGrid) {
+        for (const thumb of photoGrid.querySelectorAll(".photo-thumb")) valid.add(thumb.dataset.id);
+      }
+      selection = state.photo_ids.filter((id) => valid.has(id)).slice(0, MAX_PHOTOS);
+    }
+  }
+
   // --- Uploads: browse / drag-drop / paste, canvas downscale first ----------
   function note(message, isError) {
     uploadNote.hidden = false;
@@ -441,6 +513,7 @@ const publishedDate = published ? formatDate(published.published_at.slice(0, 10)
         data = await response.json();
       } catch {}
       if (response.ok && data && data.ok) {
+        saveState();
         location.reload();
       } else {
         note((data && data.error) || "Upload failed — try again.", true);
@@ -497,11 +570,20 @@ const publishedDate = published ? formatDate(published.published_at.slice(0, 10)
   }
 
   // --- Initial paint ---------------------------------------------------------
-  if (!finalTa.value.trim() && dirtyInput.value !== "1") {
-    finalTa.value = assemble();
+  function initialPaint() {
+    restoreState(); // re-apply any state stashed before an upload reload
+    if (!finalTa.value.trim() && dirtyInput.value !== "1") {
+      finalTa.value = assemble();
+    }
+    renderSelection();
+    syncPreview();
   }
-  renderSelection();
-  syncPreview();
+
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", initialPaint);
+  } else {
+    initialPaint();
+  }
 </script>
 
 <style>

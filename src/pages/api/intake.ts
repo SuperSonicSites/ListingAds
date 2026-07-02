@@ -59,8 +59,9 @@ ${backHref ? `<p><a href="${backHref}">Or start over with a blank form</a>.</p>`
 export const POST: APIRoute = async ({ request }) => {
   // Body size cap — the intake form is a handful of short text fields; anything
   // bigger than 64KB is abuse, not a listing.
-  const contentLength = Number(request.headers.get("content-length") ?? "0");
-  if (Number.isFinite(contentLength) && contentLength > MAX_BODY_BYTES) {
+  const contentLengthHeader = request.headers.get("content-length");
+  const contentLength = contentLengthHeader === null ? NaN : Number(contentLengthHeader);
+  if (!Number.isFinite(contentLength) || contentLength > MAX_BODY_BYTES) {
     return errorPage(413, "The submission is too large. Please shorten your entries and try again.");
   }
 

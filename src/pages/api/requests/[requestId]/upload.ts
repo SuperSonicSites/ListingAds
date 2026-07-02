@@ -23,8 +23,17 @@ function json(status: number, body: { ok: boolean; assets: AssetEntry[]; error?:
 
 // Only ever bounce back to a same-origin path — never an absolute URL.
 function safeRedirectPath(value: string): string | undefined {
-  if (value.startsWith("/") && !value.startsWith("//")) return value;
-  return undefined;
+  // Reject non-root, scheme-relative ("//"), backslash-bypass ("/\" -> "//" after
+  // browser normalization), and any embedded backslash or control character.
+  if (
+    !value.startsWith("/") ||
+    value.startsWith("//") ||
+    value.startsWith("/\\") ||
+    /[\\\x00-\x1f]/.test(value)
+  ) {
+    return undefined;
+  }
+  return value;
 }
 
 function redirectWith(path: string, warning?: string) {

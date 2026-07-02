@@ -794,11 +794,11 @@ const title = request ? `Report builder — ${request.listing_address}` : "Reque
         alert(`Pick exactly 6 gallery photos in section 03 (currently ${galleryIds.length}).`);
         return;
       }
-      try {
-        sessionStorage.removeItem(stateKey);
-      } catch {
-        /* ignore */
-      }
+      // Deliberately do NOT clear sessionStorage here: a server-side 400 (missing
+      // previews, missing realtor without waiver, bad numbers) must leave the saved
+      // builder state intact so "reopen builder" restores it. A successful generate
+      // redirects away to /reports/…, so the stale key is harmless — it's simply
+      // overwritten on the next visit and re-pulled.
     });
 
     // Boot: restore any in-progress state, then paint the picks.

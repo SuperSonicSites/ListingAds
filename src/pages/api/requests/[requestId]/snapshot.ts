@@ -9,6 +9,7 @@ import {
   writeSnapshot
 } from "../../../../lib/storage";
 import { embedAsset, findAsset } from "../../../../lib/uploads";
+import { statusIndex } from "../../../../lib/status";
 import { sendAndLog } from "../../../../lib/email";
 import { reportReadyInternal } from "../../../../lib/emailTemplates";
 import type { AdRequest, BreakdownRow, ExecReportSnapshot, InsightsSource } from "../../../../lib/types";
@@ -101,6 +102,17 @@ export const POST: APIRoute = async ({ params, request }) => {
     adRequest = await readRequest(requestId);
   } catch {
     return errorPage(404, "Request not found.", "/");
+  }
+
+  // Spec §7 row 5: the report can only be frozen once the campaign is live.
+  // Freezing earlier mints a snapshot with empty campaign fields and fires the
+  // internal report-ready email from the wrong status (e.g. new_order).
+  if (statusIndex(adRequest.status) < statusIndex("campaign_in_progress")) {
+    return errorPage(
+      400,
+      "Generate the report once the campaign is in progress — record the ad launch first.",
+      backHref
+    );
   }
 
   const form = await request.formData();

@@ -13,7 +13,10 @@ import { BROWSER_ARGS, browserPath } from "./browser";
 
 export function reportPdfFilename(snapshot: ExecReportSnapshot, fallbackId = ""): string {
   const addressSlug = slugify(snapshot.listing.address) || fallbackId || snapshot.request_id;
-  return `executive-report-${addressSlug}-${snapshot.campaign.report_due_date}.pdf`;
+  // A snapshot frozen without a due date must not produce a trailing-hyphen
+  // "...-.pdf"; fall back to the freeze date.
+  const dateSuffix = snapshot.campaign.report_due_date || snapshot.created_at.slice(0, 10);
+  return `executive-report-${addressSlug}-${dateSuffix}.pdf`;
 }
 
 export async function renderReportPdf(

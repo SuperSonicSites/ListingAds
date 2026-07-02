@@ -36,6 +36,28 @@ function isHttpUrl(value: string) {
   }
 }
 
+// SSRF guard for the logo-URL fetch: refuse hosts that can reach the box itself
+// or the private network (incl. the cloud metadata endpoint at 169.254.169.254).
+function isBlockedHost(hostname: string) {
+  const host = hostname.toLowerCase();
+  if (host === "localhost" || host === "0.0.0.0" || host === "::1" || host === "[::1]") {
+    return true;
+  }
+  if (host.endsWith(".local") || host.endsWith(".internal")) {
+    return true;
+  }
+  const ipv4 = host.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
+  if (ipv4) {
+    const [a, b] = [Number(ipv4[1]), Number(ipv4[2])];
+    if (a === 127) return true; // 127.0.0.0/8 loopback
+    if (a === 10) return true; // 10.0.0.0/8 private
+    if (a === 172 && b >= 16 && b <= 31) return true; // 172.16.0.0/12 private
+    if (a === 192 && b === 168) return true; // 192.168.0.0/16 private
+    if (a === 169 && b === 254) return true; // 169.254.0.0/16 link-local (incl. metadata)
+  }
+  return false;
+}
+
 function redirect(location: string) {
   return new Response(null, {
     status: 303,
@@ -124,8 +146,15 @@ export const POST: APIRoute = async ({ request }) => {
     const bytes = Buffer.from(await logoFile.arrayBuffer());
     logoUrl = `data:${logoFile.type};base64,${bytes.toString("base64")}`;
   } else if (logoUrl) {
+    if (isBlockedHost(new URL(logoUrl).hostname)) {
+      return errorPage(400, "That logo host isn't allowed — upload the image file instead.");
+    }
     try {
-      const response = await fetch(logoUrl, { signal: AbortSignal.timeout(8000) });
+      // redirect:"manual" so a URL that 302s to an internal address is not chased.
+      const response = await fetch(logoUrl, { signal: AbortSignal.timeout(8000), redirect: "manual" });
+      if (response.status >= 300 && response.status < 400 || response.type === "opaqueredirect") {
+        return errorPage(400, "That logo URL redirects elsewhere — upload the image file instead.");
+      }
       const contentType = (response.headers.get("content-type") ?? "").split(";")[0].trim();
       if (!response.ok || !LOGO_TYPES.has(contentType)) {
         return errorPage(400, "That logo URL did not return a PNG, JPEG, SVG, or WebP image — upload the file instead.");

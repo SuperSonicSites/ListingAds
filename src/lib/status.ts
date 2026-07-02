@@ -40,20 +40,28 @@ export function allowedForward(request: AdRequest): RequestStatus[] {
 }
 
 /**
- * Correction path: back to the previous *recorded* status (handles the extend
+ * The effective forward path for a request, honoring the extend skip. Used to
+ * derive the "move back" target so it never depends on raw status_history —
+ * which, after a correction, contains the current status twice and would
+ * otherwise resolve to the status you just came back FROM.
+ */
+function effectivePath(request: AdRequest): RequestStatus[] {
+  if (request.campaign_type === "extend") {
+    return ["new_order", "ad_published", "campaign_in_progress", "completed"];
+  }
+  return [...REQUEST_STATUSES];
+}
+
+/**
+ * Correction path: back one step along the effective path (handles the extend
  * skip naturally), plus reopening a completed request for regenerate + resend.
+ * Always strictly earlier than any allowedForward target, so a back-move can
+ * never be misclassified as a forward move (which would re-fire its emails).
  */
 export function moveBackTarget(request: AdRequest): RequestStatus | undefined {
-  if (request.status === "completed") return "campaign_in_progress";
-  const history = request.status_history;
-  for (let i = history.length - 1; i >= 0; i--) {
-    if (history[i].status === request.status) {
-      return i > 0 ? history[i - 1].status : undefined;
-    }
-  }
-  // History predates this status (shouldn't happen) — fall back to the fixed order.
-  const index = statusIndex(request.status);
-  return index > 0 ? REQUEST_STATUSES[index - 1] : undefined;
+  const path = effectivePath(request);
+  const index = path.indexOf(request.status);
+  return index > 0 ? path[index - 1] : undefined;
 }
 
 export function isTransitionAllowed(request: AdRequest, to: RequestStatus): boolean {

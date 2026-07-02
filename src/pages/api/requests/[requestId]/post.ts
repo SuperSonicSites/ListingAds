@@ -71,13 +71,17 @@ export const POST: APIRoute = async ({ params, request }) => {
     if (!isHttpUrl(permalink)) {
       return errorPage(400, "Paste the full post URL (it must start with http:// or https://).", editor);
     }
-    adRequest.post_published = {
+    const freshManual = await readRequest(requestId).catch(() => adRequest);
+    if (freshManual.post_published) {
+      return errorPage(400, "This post is already recorded as published.", editor);
+    }
+    freshManual.post_published = {
       post_id: "",
       permalink_url: permalink,
       published_at: new Date().toISOString(),
       manual: true
     };
-    await writeRequest(adRequest);
+    await writeRequest(freshManual);
     return redirect(`${editor}?published=1`);
   }
 
@@ -119,7 +123,11 @@ export const POST: APIRoute = async ({ params, request }) => {
   }
 
   const dirty = field(form, "dirty") === "1";
-  adRequest.post = {
+  // Re-read immediately before writing so in-flight photo uploads (which append
+  // to request.assets via their own read-modify-write) aren't clobbered; apply
+  // only the post fields to the fresh copy.
+  const fresh = await readRequest(requestId).catch(() => adRequest);
+  fresh.post = {
     headline_flag: headlineFlag,
     price_prefix: pricePrefix,
     price,
@@ -134,13 +142,13 @@ export const POST: APIRoute = async ({ params, request }) => {
 
   // Not hand-edited -> the server-side template is the single source of truth.
   if (!dirty) {
-    const brokerage = await readBrokerage(adRequest.brokerage_slug).catch(() => undefined);
+    const brokerage = await readBrokerage(fresh.brokerage_slug).catch(() => undefined);
     if (brokerage) {
-      adRequest.post.final_text = assembleCaption(adRequest, brokerage);
+      fresh.post.final_text = assembleCaption(fresh, brokerage);
     }
   }
 
-  await writeRequest(adRequest);
+  await writeRequest(fresh);
 
   if (action === "ready") {
     const result = await applyTransition(adRequest.id, "post_created");

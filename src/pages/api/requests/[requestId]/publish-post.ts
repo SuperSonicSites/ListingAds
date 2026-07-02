@@ -90,6 +90,13 @@ export const POST: APIRoute = async ({ params, request }) => {
   // Re-read before writing so a concurrent edit made during the (slow) photo
   // uploads isn't clobbered.
   const fresh = await readRequest(requestId);
+  // TOCTOU guard: another overlapping submission may have published while our
+  // uploads were in flight. Abort rather than overwrite (and orphan) its post id.
+  if (fresh.post_published) {
+    return redirect(
+      `${editor}?warning=${encodeURIComponent("This post was just published in another tab.")}`
+    );
+  }
   fresh.post_published = {
     post_id: result.post_id ?? "",
     ...(result.permalink_url ? { permalink_url: result.permalink_url } : {}),

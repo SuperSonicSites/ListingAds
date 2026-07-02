@@ -7,8 +7,17 @@ export const POST: APIRoute = async ({ request }) => {
   const form = await request.formData();
   const password = String(form.get("password") ?? "").trim();
   let next = String(form.get("next") ?? "/");
-  // Same-origin relative paths only — never an open redirect.
-  if (!next.startsWith("/") || next.startsWith("//")) next = "/";
+  // Same-origin relative paths only — never an open redirect. Reject "//host"
+  // AND "/\host": browsers normalize the backslash to "/", so "/\evil.com"
+  // resolves to the scheme-relative "//evil.com". Also drop control chars.
+  if (
+    !next.startsWith("/") ||
+    next.startsWith("//") ||
+    next.startsWith("/\\") ||
+    /[\\\x00-\x1f]/.test(next)
+  ) {
+    next = "/";
+  }
 
   const cookie = checkAdminPassword(password) ? adminCookieValue() : undefined;
 

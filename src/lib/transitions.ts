@@ -61,10 +61,14 @@ export async function applyTransition(requestId: string, to: RequestStatus): Pro
   if (guardError) return { ok: false, error: guardError };
 
   const forward = isForward(request, to);
+  // An extend request jumps new_order -> ad_published (skipping the post
+  // stages); note that on the timeline so the audit trail explains the gap.
+  const skipped = forward && to === "ad_published" && request.status === "new_order";
+  const note = skipped ? "extension — post stages skipped" : forward ? undefined : "correction";
   request.status = to;
   request.status_history = [
     ...request.status_history,
-    { status: to, at: new Date().toISOString(), ...(forward ? {} : { note: "correction" }) }
+    { status: to, at: new Date().toISOString(), ...(note ? { note } : {}) }
   ];
   await writeRequest(request);
 

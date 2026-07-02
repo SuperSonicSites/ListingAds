@@ -39,6 +39,7 @@ const backTarget = request ? moveBackTarget(request) : undefined;
 const currentIdx = request ? statusIndex(request.status) : 0;
 const isExtend = request?.campaign_type === "extend";
 const warning = Astro.url.searchParams.get("warning") ?? "";
+const sent = Astro.url.searchParams.get("sent") === "1";
 const withinHours = isBusinessHours();
 
 // Timestamps are shown in the team's working timezone (America/Vancouver);
@@ -148,10 +149,11 @@ const addressLines = brokerage
               <strong>{bannerText || STATUS_LABELS[request.status]}</strong>
               <span class="task-banner-actions">
                 {request.status === "new_order" && (
-                  <a class="button primary sm" href={`/requests/${request.id}/post`}>Open Post Editor</a>
-                )}
-                {request.status === "new_order" && isExtend && (
-                  <a class="button secondary sm" href="#card-campaign">Record Ad Launch</a>
+                  isExtend ? (
+                    <a class="button primary sm" href="#card-campaign">Record Ad Launch</a>
+                  ) : (
+                    <a class="button primary sm" href={`/requests/${request.id}/post`}>Open Post Editor</a>
+                  )
                 )}
                 {request.status === "post_created" && (
                   <>
@@ -180,6 +182,19 @@ const addressLines = brokerage
                   <a class="button primary sm" href={`/requests/${request.id}/report`}>Open Report Builder</a>
                 )}
               </span>
+            </div>
+          )}
+
+          {warning && (
+            <div class="page-notice notice-warning" role="alert">
+              <span>{warning}</span>
+              <button class="notice-dismiss" type="button" aria-label="Dismiss">×</button>
+            </div>
+          )}
+          {sent && (
+            <div class="page-notice notice-success" role="status">
+              <span>Report sent.</span>
+              <button class="notice-dismiss" type="button" aria-label="Dismiss">×</button>
             </div>
           )}
 
@@ -224,7 +239,6 @@ const addressLines = brokerage
                   <span>02</span>
                   <h2>Short link</h2>
                 </header>
-                {warning && <p class="import-fetch-notice">{warning}</p>}
                 {request.short_link ? (
                   <div class="shortlink-row">
                     <a href={request.short_link.url} target="_blank" rel="noopener">{request.short_link.url}</a>
@@ -568,6 +582,13 @@ const addressLines = brokerage
     });
   }
 
+  // Dismissible page notices (?warning=, ?sent=1).
+  for (const button of document.querySelectorAll<HTMLButtonElement>(".notice-dismiss")) {
+    button.addEventListener("click", () => {
+      button.closest(".page-notice")?.remove();
+    });
+  }
+
   // Report due date auto-suggestion: launch + 14 days (mirrors lib/dates addDays).
   const launchInput = document.querySelector<HTMLInputElement>("#ad-launch-date");
   const dueInput = document.querySelector<HTMLInputElement>("#report-due-date");
@@ -689,6 +710,43 @@ const addressLines = brokerage
     border-radius: var(--ss-radius-sm);
     background: #ecfdf5;
     color: #047857;
+  }
+
+  /* --- Global page notices (?warning=, ?sent=1) ----------------------------- */
+  .page-notice {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 12px;
+    margin: 0 0 18px;
+    border: 1px solid transparent;
+    border-radius: var(--ss-radius-sm);
+    padding: 11px 14px;
+    font-size: 0.88rem;
+    font-weight: 600;
+  }
+
+  .notice-warning {
+    border-color: #fecaca;
+    background: #fef2f2;
+    color: #b91c1c;
+  }
+
+  .notice-success {
+    border-color: #a7f3d0;
+    background: #ecfdf5;
+    color: #047857;
+  }
+
+  .notice-dismiss {
+    flex: 0 0 auto;
+    border: none;
+    background: transparent;
+    color: inherit;
+    padding: 0 2px;
+    font-size: 1.15rem;
+    line-height: 1;
+    cursor: pointer;
   }
 
   /* --- Layout ---------------------------------------------------------------- */

@@ -78,11 +78,25 @@ export const POST: APIRoute = async ({ params, request }) => {
     dueDate = addDays(launchDate, 14); // spec default: launch + 14 days
   }
 
-  // Blank fields clear the stored value (undefined keys are dropped from JSON).
-  record.fb_campaign_id = campaignId || undefined;
-  record.ad_launch_date = launchDate || undefined;
-  record.report_due_date = dueDate || undefined;
-  await writeRequest(record);
+  // Once launched, these three fields are load-bearing invariants (board due
+  // badges, reminders, insight pulls, the frozen report). Refuse to blank them
+  // out here — clearing them would silently break the campaign with no warning.
+  const launched = record.status === "ad_published" || record.status === "campaign_in_progress" || record.status === "completed";
+  if (launched && (!campaignId || !launchDate || !dueDate)) {
+    return errorPage(
+      400,
+      "This campaign is already launched — Campaign ID, Ad Launch Date, and Report Due Date can't be cleared. Edit the values instead of blanking them.",
+      detailHref
+    );
+  }
+
+  // Re-read immediately before writing so a concurrent save (e.g. the reminder
+  // tick) isn't clobbered; apply only the fields this route owns.
+  const fresh = await readRequest(requestId).catch(() => record);
+  fresh.fb_campaign_id = campaignId || undefined;
+  fresh.ad_launch_date = launchDate || undefined;
+  fresh.report_due_date = dueDate || undefined; // blank clears only pre-launch
+  await writeRequest(fresh);
 
   return redirect(`${detailHref}#card-campaign`);
 };
