@@ -168,18 +168,23 @@ const publishedDate = published ? formatDate(published.published_at.slice(0, 10)
             <p class="hint" id="upload-note" hidden></p>
             {
               photos.length > 0 ? (
-                <div class="photo-grid" id="photo-grid">
-                  {photos.map((photo) => (
-                    <button type="button" class="photo-thumb" data-id={photo.id} title={photo.original_name}>
-                      <img src={`${uploadsBase}/${photo.id}`} alt={photo.original_name} loading="lazy" />
-                      <span class="order-badge" />
-                    </button>
-                  ))}
-                </div>
+                <>
+                  <div class="photo-grid" id="photo-grid">
+                    {photos.map((photo) => (
+                      <button type="button" class="photo-thumb" data-id={photo.id} title={photo.original_name}>
+                        <img src={`${uploadsBase}/${photo.id}`} alt={photo.original_name} loading="lazy" />
+                        <span class="order-badge" />
+                      </button>
+                    ))}
+                  </div>
+                  <p class="hint grid-hint">
+                    Click a photo to add or remove it from the album — the badge number is the publish order.
+                  </p>
+                </>
               ) : (
                 <div class="empty-state">
                   <strong>No post photos yet</strong>
-                  <p>Upload the hand-picked listing photos — click a thumbnail afterwards to set the publish order.</p>
+                  <p>Upload the hand-picked listing photos — they join the post album automatically.</p>
                 </div>
               )
             }
@@ -513,6 +518,12 @@ const publishedDate = published ? formatDate(published.published_at.slice(0, 10)
         data = await response.json();
       } catch {}
       if (response.ok && data && data.ok) {
+        // New uploads join the album automatically (up to the cap) — the
+        // preview should show them without requiring a click-to-select.
+        for (const asset of data.assets || []) {
+          if (selection.length >= MAX_PHOTOS) break;
+          if (asset && asset.id && !selection.includes(asset.id)) selection.push(asset.id);
+        }
         saveState();
         location.reload();
       } else {
@@ -655,6 +666,10 @@ const publishedDate = published ? formatDate(published.published_at.slice(0, 10)
     color: var(--ss-muted);
     font-size: 0.84rem !important;
     line-height: 1.5;
+  }
+
+  .grid-hint {
+    margin: 10px 0 0;
   }
 
   #f-final {
@@ -899,6 +914,11 @@ const publishedDate = published ? formatDate(published.published_at.slice(0, 10)
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 2px;
+  }
+
+  /* The author-origin display:grid above would beat the UA stylesheet's [hidden] rule. */
+  .fb-grid[hidden] {
+    display: none;
   }
 
   .fb-grid :global(img) {
