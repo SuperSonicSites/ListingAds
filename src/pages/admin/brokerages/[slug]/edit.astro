@@ -1,0 +1,82 @@
+---
+import AppLayout from "../../../../layouts/AppLayout.astro";
+import SiteHeader from "../../../../components/SiteHeader.astro";
+import BrokerageForm from "../../../../components/BrokerageForm.astro";
+import { readBrokerage } from "../../../../lib/storage";
+
+const slug = Astro.params.slug ?? "";
+let brokerage;
+
+try {
+  brokerage = await readBrokerage(slug);
+} catch {
+  Astro.response.status = 404;
+}
+---
+
+<AppLayout title={brokerage ? `Edit ${brokerage.name} | Supersonic Ad Manager` : "Brokerage Not Found"} className="app-body">
+  <SiteHeader context={brokerage?.name ?? "Brokerages"}>
+    <a class="nav-link" href="/admin/brokerages">All brokerages</a>
+  </SiteHeader>
+
+  <main class="form-shell">
+    {brokerage ? (
+      <>
+        <header class="page-header">
+          <a class="back-link" href="/admin/brokerages">&larr; Back to brokerages</a>
+          <p class="eyebrow">Brokerage setup</p>
+          <h1>Edit brokerage</h1>
+          <p>
+            This updates the JSON profile at <code>data/brokerages/{brokerage.slug}.json</code>.
+            Reports already frozen for this brokerage keep their original branding.
+          </p>
+        </header>
+
+        <BrokerageForm brokerage={brokerage} />
+
+        <section class="danger-zone">
+          <div>
+            <h2>Delete this brokerage</h2>
+            <p>
+              Removes the profile and disables its intake link at
+              <code>/intake/{brokerage.intake_token}</code>. Existing requests and
+              frozen reports stay on disk. This cannot be undone.
+            </p>
+          </div>
+          <form
+            method="post"
+            action="/api/brokerage"
+            data-delete-form
+            data-brokerage-name={brokerage.name}
+          >
+            <input type="hidden" name="mode" value="delete" />
+            <input type="hidden" name="slug" value={brokerage.slug} />
+            <button class="button danger" type="submit">Delete brokerage</button>
+          </form>
+        </section>
+
+        <script>
+          // A typed confirmation, not just an OK click — deletion is irreversible.
+          const form = document.querySelector("[data-delete-form]") as HTMLFormElement | null;
+          form?.addEventListener("submit", (event) => {
+            const name = form.dataset.brokerageName ?? "";
+            const answer = prompt(`Type the brokerage name to confirm deletion:\n${name}`);
+            if (answer !== name) {
+              event.preventDefault();
+              if (answer !== null) alert("Name didn't match — nothing was deleted.");
+            }
+          });
+        </script>
+      </>
+    ) : (
+      <section class="panel">
+        <p class="eyebrow">Missing brokerage</p>
+        <h1>Brokerage not found</h1>
+        <p>No brokerage profile exists for <code>{slug}</code>.</p>
+        <div class="form-actions" style="justify-content: flex-start; padding-top: 20px;">
+          <a class="button primary" href="/admin/brokerages">Back to brokerages</a>
+        </div>
+      </section>
+    )}
+  </main>
+</AppLayout>

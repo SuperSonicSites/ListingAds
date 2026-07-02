@@ -1,0 +1,1150 @@
+---
+import AppLayout from "../../../layouts/AppLayout.astro";
+import SiteHeader from "../../../components/SiteHeader.astro";
+import { readBrokerage, readRequest } from "../../../lib/storage";
+import type { AdRequest, Brokerage, EmailKind } from "../../../lib/types";
+import { REQUEST_STATUSES } from "../../../lib/types";
+import { STATUS_LABELS, moveBackTarget, statusIndex, taskFor } from "../../../lib/status";
+import { isBusinessHours, vancouverToday } from "../../../lib/dates";
+import { formatDate } from "../../../lib/format";
+import { shortDomain } from "../../../lib/shortio";
+
+// Request detail — the operating surface for one card. Every transition except
+// the board's "Approve post" shortcut happens here, through plain HTML forms.
+const requestId = Astro.params.requestId ?? "";
+
+let request: AdRequest | undefined;
+try {
+  request = await readRequest(requestId);
+} catch {
+  request = undefined;
+}
+if (!request) Astro.response.status = 404;
+
+let brokerage: Brokerage | undefined;
+if (request) {
+  try {
+    brokerage = await readBrokerage(request.brokerage_slug);
+  } catch {
+    brokerage = undefined;
+  }
+}
+
+const today = vancouverToday();
+const brokerageName = brokerage?.name ?? request?.brokerage_slug ?? "";
+const task = request
+  ? taskFor(request, brokerage ?? ({ name: brokerageName } as Brokerage), today)
+  : null;
+const backTarget = request ? moveBackTarget(request) : undefined;
+const currentIdx = request ? statusIndex(request.status) : 0;
+const isExtend = request?.campaign_type === "extend";
+const warning = Astro.url.searchParams.get("warning") ?? "";
+const withinHours = isBusinessHours();
+
+// Timestamps are shown in the team's working timezone (America/Vancouver);
+// formatDate (UTC calendar dates) stays for plain YYYY-MM-DD fields.
+const dateTimeFormatter = new Intl.DateTimeFormat("en-CA", {
+  dateStyle: "medium",
+  timeStyle: "short",
+  timeZone: "America/Vancouver"
+});
+function formatDateTime(iso: string): string {
+  const date = new Date(iso);
+  return Number.isNaN(date.getTime()) ? iso : dateTimeFormatter.format(date);
+}
+
+// Stepper: completed steps filled, current ringed; for extend requests the two
+// post steps are struck through as "skipped" once the request has passed them.
+const steps = REQUEST_STATUSES.map((status, index) => {
+  const skipped =
+    isExtend &&
+    (status === "post_created" || status === "post_reviewed") &&
+    currentIdx >= statusIndex("ad_published");
+  return {
+    label: STATUS_LABELS[status],
+    state: skipped ? "skipped" : index < currentIdx ? "done" : index === currentIdx ? "current" : "todo"
+  };
+});
+
+const EMAIL_KIND_LABELS: Record<EmailKind, string> = {
+  intake_confirmation: "Intake confirmation",
+  review_request: "Review request",
+  launch: "Launch confirmation",
+  report_ready_internal: "Report ready (internal)",
+  report_delivery: "Report delivery",
+  report_due_reminder: "Report due reminder"
+};
+
+// Banner text when taskFor() has nothing (its nulls are intentional).
+let bannerText = task ?? "";
+if (request && !task) {
+  if (request.status === "ad_published") {
+    bannerText = "Ad launched — one click to start campaign tracking.";
+  } else if (request.status === "campaign_in_progress") {
+    bannerText = request.report_due_date
+      ? `Campaign running — report due ${formatDate(request.report_due_date)}`
+      : "Campaign running — set the report due date below.";
+  }
+}
+
+const statusAction = request ? `/api/requests/${request.id}/status` : "";
+const showRecordLaunch =
+  request && (request.status === "post_reviewed" || (request.status === "new_order" && isExtend));
+const addressLines = brokerage
+  ? [
+      brokerage.address_street,
+      [brokerage.address_city, brokerage.address_province, brokerage.address_postal]
+        .filter(Boolean)
+        .join(", "),
+      brokerage.address_country
+    ].filter(Boolean)
+  : [];
+---
+
+<AppLayout
+  title={request ? `${request.listing_address} | Supersonic Ad Manager` : "Request not found | Supersonic Ad Manager"}
+  className="app-body"
+>
+  <SiteHeader context={request ? request.listing_address : "Request"} />
+  <main class="app-shell">
+    {
+      !request && (
+        <section class="panel">
+          <p class="eyebrow">Request</p>
+          <h1>Request not found</h1>
+          <p>This request does not exist (or its file was removed).</p>
+          <p><a class="button secondary" href="/">Back to the board</a></p>
+        </section>
+      )
+    }
+
+    {
+      request && (
+        <>
+          <a class="back-link" href="/">← Board</a>
+
+          <header class="page-header detail-header">
+            <p class="eyebrow">{brokerageName}</p>
+            <h1>{request.listing_address}</h1>
+            <ol class="stepper">
+              {steps.map((step) => (
+                <li class={`step ${step.state}`}>
+                  <span class="step-dot" />
+                  <span class="step-label">{step.label}</span>
+                </li>
+              ))}
+            </ol>
+          </header>
+
+          {request.status === "completed" ? (
+            <div class="task-banner done-banner">
+              <strong>
+                Completed — report sent{" "}
+                {request.report_sent_at ? formatDate(request.report_sent_at.slice(0, 10)) : ""}
+              </strong>
+            </div>
+          ) : (
+            <div class="task-banner import-fetch-notice">
+              <strong>{bannerText || STATUS_LABELS[request.status]}</strong>
+              <span class="task-banner-actions">
+                {request.status === "new_order" && (
+                  <a class="button primary sm" href={`/requests/${request.id}/post`}>Open Post Editor</a>
+                )}
+                {request.status === "new_order" && isExtend && (
+                  <a class="button secondary sm" href="#card-campaign">Record Ad Launch</a>
+                )}
+                {request.status === "post_created" && (
+                  <>
+                    <a class="button secondary sm" href={`/requests/${request.id}/post`}>Open Post Editor</a>
+                    <form method="post" action={statusAction}>
+                      <input type="hidden" name="to" value="post_reviewed" />
+                      <button class="button primary sm" type="submit">Approve post</button>
+                    </form>
+                  </>
+                )}
+                {request.status === "post_reviewed" && (
+                  <>
+                    <a class="button primary sm" href={`/requests/${request.id}/post`}>
+                      Open Post Editor (Push Live)
+                    </a>
+                    <a class="button secondary sm" href="#card-campaign">Record Ad Launch</a>
+                  </>
+                )}
+                {request.status === "ad_published" && (
+                  <form method="post" action={statusAction}>
+                    <input type="hidden" name="to" value="campaign_in_progress" />
+                    <button class="button primary sm" type="submit">Start Campaign Tracking</button>
+                  </form>
+                )}
+                {request.status === "campaign_in_progress" && (
+                  <a class="button primary sm" href={`/requests/${request.id}/report`}>Open Report Builder</a>
+                )}
+              </span>
+            </div>
+          )}
+
+          <div class="detail-grid">
+            <div class="detail-main">
+              {/* 01 — Submission */}
+              <section class="detail-card" id="card-submission">
+                <header class="detail-card-head">
+                  <span>01</span>
+                  <h2>Submission</h2>
+                </header>
+                <dl class="detail-dl">
+                  <div><dt>Listing address</dt><dd>{request.listing_address}</dd></div>
+                  <div><dt>Ad budget</dt><dd>${request.ad_budget}</dd></div>
+                  <div>
+                    <dt>Campaign type</dt>
+                    <dd>{isExtend ? "Extend Existing Campaign" : "New Ad Campaign"}</dd>
+                  </div>
+                  <div><dt>Target cities</dt><dd>{request.target_cities.join(", ")}</dd></div>
+                  <div>
+                    <dt>Photos link</dt>
+                    <dd>
+                      <a href={request.photos_link} target="_blank" rel="noopener">{request.photos_link}</a>
+                    </dd>
+                  </div>
+                  <div>
+                    <dt>Realtor.ca stats link</dt>
+                    <dd>
+                      <a href={request.realtor_stats_link} target="_blank" rel="noopener">
+                        {request.realtor_stats_link}
+                      </a>
+                    </dd>
+                  </div>
+                  <div><dt>Special notes</dt><dd>{request.special_notes || "—"}</dd></div>
+                  <div><dt>Submitted</dt><dd>{formatDateTime(request.created_at)}</dd></div>
+                </dl>
+              </section>
+
+              {/* 02 — Short link */}
+              <section class="detail-card" id="card-shortlink">
+                <header class="detail-card-head">
+                  <span>02</span>
+                  <h2>Short link</h2>
+                </header>
+                {warning && <p class="import-fetch-notice">{warning}</p>}
+                {request.short_link ? (
+                  <div class="shortlink-row">
+                    <a href={request.short_link.url} target="_blank" rel="noopener">{request.short_link.url}</a>
+                    <button class="button secondary sm" type="button" data-copy={request.short_link.url}>
+                      Copy
+                    </button>
+                    {request.short_link.path && <code>/{request.short_link.path}</code>}
+                  </div>
+                ) : (
+                  <form class="shortlink-form" method="post" action={`/api/requests/${request.id}/shortlink`}>
+                    <div class="client-field-grid two">
+                      <label class="client-field">
+                        <span>Path on {shortDomain()}</span>
+                        <input
+                          type="text"
+                          name="path"
+                          pattern="[a-z0-9\-]{3,40}"
+                          placeholder="mls17354"
+                          autocomplete="off"
+                        />
+                      </label>
+                      <label class="client-field">
+                        <span>Destination URL (where the short link points)</span>
+                        <input type="url" name="original_url" placeholder="https://…" />
+                      </label>
+                    </div>
+                    <div class="shortlink-actions">
+                      <button class="button primary sm" type="submit">Create {shortDomain()} link</button>
+                    </div>
+                    <div class="client-field-grid two shortlink-manual">
+                      <label class="client-field">
+                        <span>…or paste an existing short link</span>
+                        <input type="url" name="manual_url" placeholder={`https://${shortDomain()}/…`} />
+                      </label>
+                      <div class="shortlink-manual-action">
+                        <button class="button secondary sm" type="submit">Save pasted link</button>
+                      </div>
+                    </div>
+                  </form>
+                )}
+              </section>
+
+              {/* 03 — Post */}
+              <section class="detail-card" id="card-post">
+                <header class="detail-card-head">
+                  <span>03</span>
+                  <h2>Post</h2>
+                  <a class="button secondary sm head-action" href={`/requests/${request.id}/post`}>
+                    Open Post Editor
+                  </a>
+                </header>
+                {request.post_published ? (
+                  <div class="post-published">
+                    <p>
+                      {request.post_published.permalink_url ? (
+                        <a href={request.post_published.permalink_url} target="_blank" rel="noopener">
+                          View published post
+                        </a>
+                      ) : (
+                        <span>Post ID: <code>{request.post_published.post_id}</code></span>
+                      )}
+                      <span class="post-published-meta">
+                        Published {formatDateTime(request.post_published.published_at)}
+                      </span>
+                      {request.post_published.manual && <span class="manual-badge">manual</span>}
+                    </p>
+                    {request.post.final_text && <pre class="post-preview">{request.post.final_text}</pre>}
+                  </div>
+                ) : (
+                  <p class="detail-muted">
+                    Not published yet. Draft, preview, and push the Facebook post from the editor.
+                  </p>
+                )}
+              </section>
+
+              {/* 04 — Campaign */}
+              <section class="detail-card" id="card-campaign">
+                <header class="detail-card-head">
+                  <span>04</span>
+                  <h2>Campaign</h2>
+                </header>
+                <form method="post" action={`/api/requests/${request.id}/campaign`}>
+                  <input type="hidden" name="to" value="ad_published" />
+                  <div class="client-field-grid two">
+                    <label class="client-field">
+                      <span>Facebook Campaign ID</span>
+                      <input
+                        type="text"
+                        name="fb_campaign_id"
+                        inputmode="numeric"
+                        placeholder="120210000000000000"
+                        value={request.fb_campaign_id ?? ""}
+                      />
+                    </label>
+                    <label class="client-field allow-any">
+                      <span>&nbsp;</span>
+                      <label class="allow-any-check">
+                        <input type="checkbox" name="allow_any" />
+                        Non-standard ID (skip the digits check)
+                      </label>
+                    </label>
+                    <label class="client-field">
+                      <span>Ad Launch Date</span>
+                      <input type="date" name="ad_launch_date" id="ad-launch-date" value={request.ad_launch_date ?? ""} />
+                    </label>
+                    <label class="client-field">
+                      <span>Report Due Date (defaults to launch + 14 days)</span>
+                      <input type="date" name="report_due_date" id="report-due-date" value={request.report_due_date ?? ""} />
+                    </label>
+                  </div>
+                  <div class="campaign-actions">
+                    <button class="button secondary sm" type="submit">Save campaign details</button>
+                    {showRecordLaunch && (
+                      <button class="button primary sm" type="submit" formaction={statusAction}>
+                        Record Ad Launch
+                      </button>
+                    )}
+                  </div>
+                </form>
+              </section>
+
+              {/* 05 — Report */}
+              <section class="detail-card" id="card-report">
+                <header class="detail-card-head">
+                  <span>05</span>
+                  <h2>Report</h2>
+                  <a class="button secondary sm head-action" href={`/requests/${request.id}/report`}>
+                    Open Report Builder
+                  </a>
+                </header>
+                {request.report_snapshot_id ? (
+                  <div class="report-links">
+                    <a class="button secondary sm" href={`/reports/${request.report_snapshot_id}`}>View report</a>
+                    <a class="button secondary sm" href={`/api/pdf/${request.report_snapshot_id}`}>Download PDF</a>
+                  </div>
+                ) : (
+                  <p class="detail-muted">No Executive Report generated yet.</p>
+                )}
+                {request.report_sent_at && (
+                  <p class="sent-notice">Report sent {formatDateTime(request.report_sent_at)}.</p>
+                )}
+                {request.status === "campaign_in_progress" && request.report_snapshot_id && (
+                  <form class="send-block" method="post" action={`/api/requests/${request.id}/send-report`}>
+                    {withinHours ? (
+                      <p class="send-window quiet">Within send window (reports go out Mon–Fri, 9–5 PST).</p>
+                    ) : (
+                      <p class="send-window import-fetch-notice">
+                        It's currently outside the Mon–Fri 9am–5pm PST send window. You can still send now, or
+                        wait until business hours.
+                      </p>
+                    )}
+                    <div class="send-row">
+                      <label class="client-field">
+                        <span>Recipient</span>
+                        <input type="email" name="to" required value={brokerage?.contact_email ?? ""} />
+                      </label>
+                      <button class="button primary" type="submit">Send Executive Report</button>
+                    </div>
+                  </form>
+                )}
+              </section>
+
+              {/* 06 — Status timeline */}
+              <section class="detail-card" id="card-timeline">
+                <header class="detail-card-head">
+                  <span>06</span>
+                  <h2>Status timeline</h2>
+                </header>
+                <ol class="timeline">
+                  {request.status_history.map((entry) => (
+                    <li>
+                      <strong>{STATUS_LABELS[entry.status]}</strong>
+                      <span>{formatDateTime(entry.at)}</span>
+                      {entry.note && <em class="timeline-note">{entry.note}</em>}
+                    </li>
+                  ))}
+                </ol>
+              </section>
+
+              {/* 07 — Email log */}
+              <section class="detail-card" id="card-emails">
+                <header class="detail-card-head">
+                  <span>07</span>
+                  <h2>Email log</h2>
+                </header>
+                {request.emails.length === 0 ? (
+                  <p class="detail-muted">No emails yet.</p>
+                ) : (
+                  <div class="email-table-wrap">
+                    <table class="email-table">
+                      <thead>
+                        <tr>
+                          <th>Email</th>
+                          <th>To</th>
+                          <th>Subject</th>
+                          <th>Sent</th>
+                          <th>Status</th>
+                          <th />
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {request.emails.map((entry) => (
+                          <tr>
+                            <td>{EMAIL_KIND_LABELS[entry.kind] ?? entry.kind}</td>
+                            <td>{entry.to}</td>
+                            <td class="email-subject">{entry.subject}</td>
+                            <td>{formatDateTime(entry.sent_at)}</td>
+                            <td>
+                              {entry.ok ? (
+                                <span class="email-chip sent">Sent</span>
+                              ) : (
+                                <span class="email-chip failed" title={entry.error ?? "Send failed"}>Failed</span>
+                              )}
+                            </td>
+                            <td>
+                              <form method="post" action={`/api/requests/${request.id}/email`}>
+                                <input type="hidden" name="kind" value={entry.kind} />
+                                <button class="button ghost sm" type="submit">Resend</button>
+                              </form>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </section>
+
+              {/* Footer controls: correction paths + escape hatches. */}
+              <div class="detail-footer">
+                {request.status === "completed" ? (
+                  <form method="post" action={statusAction}>
+                    <input type="hidden" name="to" value="campaign_in_progress" />
+                    <button class="button ghost" type="submit">Reopen</button>
+                  </form>
+                ) : (
+                  backTarget && (
+                    <form method="post" action={statusAction}>
+                      <input type="hidden" name="to" value={backTarget} />
+                      <button class="button ghost" type="submit">
+                        Move back to {STATUS_LABELS[backTarget]}
+                      </button>
+                    </form>
+                  )
+                )}
+                {request.status === "campaign_in_progress" && (
+                  <form
+                    method="post"
+                    action={statusAction}
+                    id="complete-form"
+                    data-sent={request.report_sent_at ? "1" : "0"}
+                  >
+                    <input type="hidden" name="to" value="completed" />
+                    <button class="button secondary" type="submit">Complete</button>
+                  </form>
+                )}
+              </div>
+            </div>
+
+            {/* Sticky brokerage side panel */}
+            <aside class="detail-side">
+              <div class="side-panel">
+                {brokerage ? (
+                  <>
+                    <div class="side-logo client-card-logo">
+                      {brokerage.logo_url ? <img src={brokerage.logo_url} alt="" /> : null}
+                    </div>
+                    <h3>{brokerage.name}</h3>
+                    <p class="side-contact">
+                      {brokerage.contact_name}
+                      {brokerage.contact_email && <> · <a href={`mailto:${brokerage.contact_email}`}>{brokerage.contact_email}</a></>}
+                    </p>
+                    {brokerage.contact_phone && <p class="side-line">{brokerage.contact_phone}</p>}
+                    {brokerage.website && (
+                      <p class="side-line">
+                        <a href={brokerage.website} target="_blank" rel="noopener">{brokerage.website}</a>
+                      </p>
+                    )}
+                    {brokerage.meta_ad_account_id && (
+                      <p class="side-line side-code">
+                        <span>Ad account</span>
+                        <code>act_{brokerage.meta_ad_account_id}</code>
+                        <button
+                          class="button ghost sm"
+                          type="button"
+                          data-copy={`act_${brokerage.meta_ad_account_id}`}
+                        >
+                          Copy
+                        </button>
+                      </p>
+                    )}
+                    {brokerage.meta_page_id && (
+                      <p class="side-line side-code">
+                        <span>Page ID</span>
+                        <code>{brokerage.meta_page_id}</code>
+                      </p>
+                    )}
+                    {addressLines.length > 0 && (
+                      <p class="side-address">
+                        {addressLines.map((line) => (
+                          <span>{line}</span>
+                        ))}
+                      </p>
+                    )}
+                    <a class="button secondary sm side-edit" href={`/admin/brokerages/${brokerage.slug}/edit`}>
+                      Edit brokerage
+                    </a>
+                  </>
+                ) : (
+                  <>
+                    <h3>Brokerage deleted</h3>
+                    <p class="side-line">
+                      The brokerage <code>{request.brokerage_slug}</code> no longer exists. This request stays
+                      viewable, but client emails cannot be rebuilt.
+                    </p>
+                  </>
+                )}
+              </div>
+            </aside>
+          </div>
+        </>
+      )
+    }
+  </main>
+</AppLayout>
+
+<script>
+  // Copy buttons (short link, ad account id).
+  for (const button of document.querySelectorAll<HTMLButtonElement>("[data-copy]")) {
+    button.addEventListener("click", async () => {
+      try {
+        await navigator.clipboard.writeText(button.dataset.copy ?? "");
+        const original = button.textContent;
+        button.textContent = "Copied";
+        setTimeout(() => {
+          button.textContent = original;
+        }, 1200);
+      } catch {
+        /* clipboard unavailable — the value is visible next to the button */
+      }
+    });
+  }
+
+  // Report due date auto-suggestion: launch + 14 days (mirrors lib/dates addDays).
+  const launchInput = document.querySelector<HTMLInputElement>("#ad-launch-date");
+  const dueInput = document.querySelector<HTMLInputElement>("#report-due-date");
+  if (launchInput && dueInput) {
+    launchInput.addEventListener("change", () => {
+      if (dueInput.value || !launchInput.value) return;
+      const date = new Date(`${launchInput.value}T00:00:00Z`);
+      if (Number.isNaN(date.getTime())) return;
+      date.setUTCDate(date.getUTCDate() + 14);
+      dueInput.value = date.toISOString().slice(0, 10);
+    });
+  }
+
+  // Manual Complete: soft confirm when the report was never sent.
+  const completeForm = document.querySelector<HTMLFormElement>("#complete-form");
+  completeForm?.addEventListener("submit", (event) => {
+    if (completeForm.dataset.sent === "1") return;
+    if (!confirm("The report hasn't been sent — complete anyway?")) event.preventDefault();
+  });
+</script>
+
+<style>
+  .detail-header {
+    padding-bottom: 18px;
+  }
+
+  /* --- Stepper ------------------------------------------------------------ */
+  .stepper {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px 18px;
+    margin: 20px 0 0;
+    padding: 0;
+    list-style: none;
+  }
+
+  .step {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+  }
+
+  .step-dot {
+    width: 12px;
+    height: 12px;
+    flex: 0 0 auto;
+    border: 2px solid var(--ss-border-strong);
+    border-radius: 999px;
+    background: var(--ss-surface);
+  }
+
+  .step-label {
+    color: var(--ss-muted);
+    font-size: 0.78rem;
+    font-weight: 600;
+    white-space: nowrap;
+  }
+
+  .step.done .step-dot {
+    border-color: var(--ss-ink);
+    background: var(--ss-ink);
+  }
+
+  .step.done .step-label {
+    color: var(--ss-text-soft);
+  }
+
+  .step.current .step-dot {
+    border-color: var(--ss-accent-deep);
+    background: var(--ss-accent-deep);
+    box-shadow: 0 0 0 3px var(--ss-accent-soft);
+  }
+
+  .step.current .step-label {
+    color: var(--ss-accent-ink);
+    font-weight: 700;
+  }
+
+  .step.skipped .step-dot {
+    border-style: dashed;
+    background: var(--ss-bg);
+  }
+
+  .step.skipped .step-label {
+    color: var(--ss-muted);
+    text-decoration: line-through;
+  }
+
+  .step.skipped .step-label::after {
+    content: " (skipped)";
+    text-decoration: none;
+    font-weight: 500;
+  }
+
+  /* --- Task banner ---------------------------------------------------------- */
+  .task-banner {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    margin: 0 0 18px !important;
+    padding: 12px 16px;
+  }
+
+  .task-banner strong {
+    font-size: 0.92rem;
+    letter-spacing: 0.01em;
+  }
+
+  .task-banner-actions {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .done-banner {
+    border-radius: var(--ss-radius-sm);
+    background: #ecfdf5;
+    color: #047857;
+  }
+
+  /* --- Layout ---------------------------------------------------------------- */
+  .detail-grid {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 300px;
+    gap: 18px;
+    align-items: start;
+  }
+
+  .detail-main {
+    display: grid;
+    gap: 14px;
+    min-width: 0;
+  }
+
+  .detail-card {
+    border: 1px solid var(--ss-border);
+    border-radius: var(--ss-radius-lg);
+    background: var(--ss-surface);
+    box-shadow: var(--ss-shadow-sm);
+    padding: 20px 22px;
+  }
+
+  .detail-card-head {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 16px;
+  }
+
+  .detail-card-head > span {
+    display: inline-flex;
+    width: 30px;
+    height: 30px;
+    flex: 0 0 auto;
+    align-items: center;
+    justify-content: center;
+    border-radius: var(--ss-radius-sm);
+    background: var(--ss-accent-soft);
+    color: var(--ss-accent-ink);
+    font-size: 0.72rem;
+    font-weight: 700;
+  }
+
+  .detail-card-head h2 {
+    margin: 0;
+    color: var(--ss-ink);
+    font-size: 1rem;
+    font-weight: 700;
+    letter-spacing: -0.01em;
+  }
+
+  .head-action {
+    margin-left: auto;
+  }
+
+  .detail-muted {
+    margin: 0;
+    color: var(--ss-muted);
+    font-size: 0.88rem;
+  }
+
+  /* --- 01 Submission dl ------------------------------------------------------- */
+  .detail-dl {
+    display: grid;
+    margin: 0;
+    border-top: 1px solid var(--ss-border);
+  }
+
+  .detail-dl div {
+    display: grid;
+    grid-template-columns: 170px minmax(0, 1fr);
+    gap: 16px;
+    padding: 10px 2px;
+    border-bottom: 1px solid var(--ss-border);
+  }
+
+  .detail-dl dt {
+    color: var(--ss-muted);
+    font-size: 0.78rem;
+    font-weight: 650;
+  }
+
+  .detail-dl dd {
+    margin: 0;
+    min-width: 0;
+    overflow-wrap: anywhere;
+    color: var(--ss-text);
+    font-size: 0.88rem;
+    font-weight: 550;
+  }
+
+  .detail-dl a {
+    color: var(--ss-accent-ink);
+    font-weight: 600;
+  }
+
+  /* --- 02 Short link ------------------------------------------------------------ */
+  .shortlink-row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 10px;
+  }
+
+  .shortlink-row a {
+    overflow-wrap: anywhere;
+    color: var(--ss-accent-ink);
+    font-weight: 650;
+  }
+
+  .shortlink-form {
+    display: grid;
+    gap: 12px;
+  }
+
+  .shortlink-actions {
+    display: flex;
+    justify-content: flex-end;
+  }
+
+  .shortlink-manual {
+    border-top: 1px dashed var(--ss-border-strong);
+    padding-top: 12px;
+    align-items: end;
+  }
+
+  .shortlink-manual-action {
+    display: flex;
+    align-items: flex-end;
+    padding-bottom: 2px;
+  }
+
+  /* --- 03 Post ---------------------------------------------------------------- */
+  .post-published p {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 10px;
+    margin: 0;
+    font-size: 0.88rem;
+  }
+
+  .post-published a {
+    color: var(--ss-accent-ink);
+    font-weight: 650;
+  }
+
+  .post-published-meta {
+    color: var(--ss-muted);
+    font-size: 0.8rem;
+  }
+
+  .manual-badge {
+    display: inline-flex;
+    align-items: center;
+    border: 1px solid var(--ss-border-strong);
+    border-radius: 999px;
+    background: var(--ss-bg);
+    padding: 1px 9px;
+    color: var(--ss-text-soft);
+    font-size: 0.7rem;
+    font-weight: 650;
+    text-transform: uppercase;
+  }
+
+  .post-preview {
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 6;
+    overflow: hidden;
+    margin: 12px 0 0;
+    border: 1px solid var(--ss-border);
+    border-radius: var(--ss-radius-sm);
+    background: var(--ss-bg);
+    padding: 12px 14px;
+    color: var(--ss-text);
+    font-family: inherit;
+    font-size: 0.86rem;
+    line-height: 1.55;
+    white-space: pre-wrap;
+  }
+
+  /* --- 04 Campaign ------------------------------------------------------------- */
+  .campaign-actions {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    gap: 10px;
+    margin-top: 14px;
+  }
+
+  .allow-any-check {
+    display: flex;
+    min-height: 42px;
+    align-items: center;
+    gap: 9px;
+    color: var(--ss-text-soft);
+    font-size: 0.82rem;
+    font-weight: 550;
+  }
+
+  .allow-any-check input {
+    width: 16px;
+    height: 16px;
+    accent-color: var(--ss-accent-deep);
+  }
+
+  /* --- 05 Report ---------------------------------------------------------------- */
+  .report-links {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+  }
+
+  .sent-notice {
+    margin: 12px 0 0;
+    border-radius: var(--ss-radius-sm);
+    background: #ecfdf5;
+    padding: 9px 12px;
+    color: #047857;
+    font-size: 0.86rem;
+    font-weight: 600;
+  }
+
+  .send-block {
+    display: grid;
+    gap: 12px;
+    margin-top: 16px;
+    border-top: 1px solid var(--ss-border);
+    padding-top: 16px;
+  }
+
+  .send-window {
+    margin: 0 !important;
+  }
+
+  .send-window.quiet {
+    border-radius: var(--ss-radius-sm);
+    background: var(--ss-bg);
+    padding: 8px 10px;
+    color: var(--ss-muted);
+    font-size: 0.82rem;
+    font-weight: 600;
+  }
+
+  .send-row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-end;
+    gap: 12px;
+  }
+
+  .send-row .client-field {
+    flex: 1 1 260px;
+  }
+
+  /* --- 06 Timeline ---------------------------------------------------------------- */
+  .timeline {
+    display: grid;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+    border-top: 1px solid var(--ss-border);
+  }
+
+  .timeline li {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 12px;
+    border-bottom: 1px solid var(--ss-border);
+    padding: 10px 2px;
+  }
+
+  .timeline strong {
+    color: var(--ss-ink);
+    font-size: 0.88rem;
+    font-weight: 700;
+  }
+
+  .timeline span {
+    color: var(--ss-muted);
+    font-size: 0.8rem;
+  }
+
+  .timeline-note {
+    border: 1px solid #fed7aa;
+    border-radius: 999px;
+    background: #fff7ed;
+    padding: 1px 9px;
+    color: #9a3412;
+    font-size: 0.7rem;
+    font-style: normal;
+    font-weight: 650;
+  }
+
+  /* --- 07 Email log ---------------------------------------------------------------- */
+  .email-table-wrap {
+    overflow-x: auto;
+  }
+
+  .email-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.83rem;
+  }
+
+  .email-table th {
+    border-bottom: 1px solid var(--ss-border);
+    padding: 8px 10px 8px 2px;
+    color: var(--ss-muted);
+    font-size: 0.7rem;
+    font-weight: 700;
+    letter-spacing: 0.05em;
+    text-align: left;
+    text-transform: uppercase;
+    white-space: nowrap;
+  }
+
+  .email-table td {
+    border-bottom: 1px solid var(--ss-border);
+    padding: 9px 10px 9px 2px;
+    color: var(--ss-text);
+    vertical-align: middle;
+  }
+
+  .email-subject {
+    max-width: 240px;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
+
+  .email-chip {
+    display: inline-flex;
+    align-items: center;
+    border-radius: 999px;
+    padding: 2px 10px;
+    font-size: 0.72rem;
+    font-weight: 650;
+  }
+
+  .email-chip.sent {
+    background: #ecfdf5;
+    color: #047857;
+  }
+
+  .email-chip.failed {
+    background: #fef2f2;
+    color: #b91c1c;
+    cursor: help;
+  }
+
+  /* --- Footer controls ---------------------------------------------------------------- */
+  .detail-footer {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 6px 2px 0;
+  }
+
+  /* --- Side panel ---------------------------------------------------------------- */
+  .detail-side {
+    position: sticky;
+    top: 84px;
+  }
+
+  .side-panel {
+    display: grid;
+    gap: 10px;
+    border: 1px solid var(--ss-border);
+    border-radius: var(--ss-radius-lg);
+    background: var(--ss-surface);
+    box-shadow: var(--ss-shadow-sm);
+    padding: 20px;
+  }
+
+  .side-logo {
+    width: 64px;
+    height: 64px;
+  }
+
+  .side-panel h3 {
+    margin: 2px 0 0;
+    color: var(--ss-ink);
+    font-size: 1rem;
+    font-weight: 700;
+    letter-spacing: -0.01em;
+  }
+
+  .side-contact,
+  .side-line {
+    margin: 0;
+    color: var(--ss-text-soft);
+    font-size: 0.84rem;
+    line-height: 1.5;
+    overflow-wrap: anywhere;
+  }
+
+  .side-panel a {
+    color: var(--ss-accent-ink);
+    font-weight: 600;
+    text-decoration: none;
+  }
+
+  .side-panel a:hover {
+    text-decoration: underline;
+  }
+
+  .side-code {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .side-code > span {
+    color: var(--ss-muted);
+    font-size: 0.74rem;
+    font-weight: 650;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+  }
+
+  .side-address {
+    display: grid;
+    gap: 2px;
+    margin: 4px 0 0;
+    border-top: 1px solid var(--ss-border);
+    padding-top: 10px;
+    color: var(--ss-text-soft);
+    font-size: 0.84rem;
+  }
+
+  .side-edit {
+    justify-self: start;
+    margin-top: 6px;
+  }
+
+  @media (max-width: 980px) {
+    .detail-grid {
+      grid-template-columns: 1fr;
+    }
+
+    .detail-side {
+      position: static;
+      order: -1;
+    }
+
+    .detail-dl div {
+      grid-template-columns: 1fr;
+      gap: 3px;
+    }
+  }
+</style>

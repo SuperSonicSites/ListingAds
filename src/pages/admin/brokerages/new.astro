@@ -1,0 +1,25 @@
+---
+import AppLayout from "../../../layouts/AppLayout.astro";
+import SiteHeader from "../../../components/SiteHeader.astro";
+import BrokerageForm from "../../../components/BrokerageForm.astro";
+---
+
+<AppLayout title="New Brokerage | Supersonic Ad Manager" className="app-body">
+  <SiteHeader context="Brokerages">
+    <a class="nav-link" href="/admin/brokerages">All brokerages</a>
+  </SiteHeader>
+
+  <main class="form-shell">
+    <header class="page-header">
+      <a class="back-link" href="/admin/brokerages">&larr; Back to brokerages</a>
+      <p class="eyebrow">Brokerage setup</p>
+      <h1>New brokerage</h1>
+      <p>
+        This writes a JSON profile to <code>data/brokerages</code> and mints the
+        brokerage's secret intake link for submitting ad requests.
+      </p>
+    </header>
+
+    <BrokerageForm />
+  </main>
+</AppLayout>

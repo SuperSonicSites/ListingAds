@@ -1,0 +1,1139 @@
+---
+import AppLayout from "../../../layouts/AppLayout.astro";
+import SiteHeader from "../../../components/SiteHeader.astro";
+import { readBrokerage, readRequest } from "../../../lib/storage";
+import { STATUS_LABELS, statusIndex } from "../../../lib/status";
+import type { AdRequest, AssetEntry, Brokerage } from "../../../lib/types";
+
+// Report builder — numbered sections mirroring the Executive Report pages.
+// Manual-fallback invariant: every auto-pulled value lands in an editable
+// input; the snapshot freezes whatever the team reviewed, never raw API data.
+
+const requestId = Astro.params.requestId ?? "";
+let request: AdRequest | undefined;
+let brokerage: Brokerage | undefined;
+
+try {
+  request = await readRequest(requestId);
+} catch {
+  Astro.response.status = 404;
+}
+if (request) {
+  try {
+    brokerage = await readBrokerage(request.brokerage_slug);
+  } catch {
+    brokerage = undefined;
+  }
+}
+
+const assets: AssetEntry[] = request?.assets ?? [];
+const single = (kind: string) => assets.find((asset) => asset.kind === kind);
+
+const photoAssets = assets.filter((asset) =>
+  asset.kind === "hero" || asset.kind === "gallery" || asset.kind === "post_photo"
+);
+const previewMobile = single("ad_preview_mobile");
+const previewDesktop = single("ad_preview_desktop");
+const realtorSlots = [
+  { kind: "realtor_7", label: "7 Day" },
+  { kind: "realtor_30", label: "30 Day" },
+  { kind: "realtor_90", label: "90 Day" }
+].map((slot) => ({ ...slot, entry: single(slot.kind) }));
+const anyRealtorMissing = realtorSlots.some((slot) => !slot.entry);
+const insightsShots = assets.filter((asset) => asset.kind === "insights_screenshot");
+
+const earlyStatus =
+  request !== undefined && statusIndex(request.status) < statusIndex("campaign_in_progress");
+
+const assetUrl = (asset: AssetEntry) => `/api/uploads/${requestId}/${asset.id}`;
+
+const addressLine = brokerage
+  ? [
+      brokerage.address_street,
+      brokerage.address_city,
+      [brokerage.address_province, brokerage.address_postal].filter(Boolean).join(" "),
+      brokerage.address_country
+    ]
+      .filter(Boolean)
+      .join(", ")
+  : "";
+const contactLine = brokerage
+  ? [brokerage.contact_name, brokerage.contact_phone].filter(Boolean).join(" · ")
+  : "";
+
+const existingSnapshotId = request?.report_snapshot_id ?? "";
+const title = request ? `Report builder — ${request.listing_address}` : "Request not found";
+---
+
+<AppLayout title={title} className="app-body">
+  <SiteHeader context={request?.listing_address} />
+  {request ? (
+    <main class="client-workspace">
+      <a class="back-link" href={`/requests/${request.id}`}>&larr; Back to request</a>
+      <header class="client-form-hero">
+        <p class="eyebrow">Executive report</p>
+        <h1>Report builder</h1>
+        <p>
+          {request.listing_address}
+          {brokerage ? ` — ${brokerage.name}` : ""}. Pull the campaign stats, review every value, pick the
+          photos, and freeze the report.
+        </p>
+        {earlyStatus && (
+          <p class="import-fetch-notice">
+            This request is still at “{STATUS_LABELS[request.status]}”. You can prepare the report early, but
+            campaigns normally reach Campaign In Progress before the report goes out.
+          </p>
+        )}
+      </header>
+
+      <form
+        id="report-form"
+        class="client-report-form"
+        method="post"
+        action={`/api/requests/${request.id}/snapshot`}
+        data-request-id={request.id}
+      >
+        <input type="hidden" name="insights_source" id="insights_source" value="manual" />
+        <input type="hidden" name="region_json" id="region_json" value="" />
+        <input type="hidden" name="age_gender_json" id="age_gender_json" value="" />
+        <input type="hidden" name="hero_id" id="hero_id" value="" />
+        <input type="hidden" name="gallery_ids" id="gallery_ids" value="" />
+
+        <!-- 01 · Ad stats -->
+        <section class="client-form-card">
+          <header class="client-section-header">
+            <span>01</span>
+            <div>
+              <h2>Ad stats</h2>
+              <p>
+                Pulled from the Meta campaign between launch and report due date. Every number stays
+                editable — what you see here is what gets frozen.
+              </p>
+            </div>
+          </header>
+          <div class="client-review-area">
+            <div class="client-pull-strip">
+              <div class="client-pull-status">
+                <span></span>
+                <div>
+                  <strong>Meta campaign insights</strong>
+                  <small>
+                    Source: <span class="source-badge" id="stats-source">Manual</span>
+                  </small>
+                </div>
+              </div>
+              <button type="button" class="client-pull-button" id="pull-stats">Pull ad stats</button>
+            </div>
+            <div id="stats-warnings"></div>
+
+            <div class="client-field-grid stats-grid">
+              <label class="client-field">
+                <span>Total Ad Impressions</span>
+                <input type="number" name="impressions" id="impressions" min="0" step="1" inputmode="numeric" placeholder="0" />
+              </label>
+              <label class="client-field">
+                <span>Reach</span>
+                <input type="number" name="reach" id="reach" min="0" step="1" inputmode="numeric" placeholder="0" />
+              </label>
+              <label class="client-field">
+                <span>All Clicks &amp; Likes</span>
+                <input type="number" name="clicks_all" id="clicks_all" min="0" step="1" inputmode="numeric" placeholder="0" />
+                <small class="field-note">
+                  All Clicks &amp; Likes = Meta's “clicks” metric (all clicks on the ad, including likes).
+                </small>
+              </label>
+            </div>
+
+            <div class="break-block">
+              <div class="break-head">
+                <strong>Region breakdown</strong>
+                <button type="button" class="button secondary sm" data-add-row="region">Add row</button>
+              </div>
+              <div class="break-cols">
+                <span>Region</span><span>Impressions</span><span>Reach</span><span>Clicks</span><span></span>
+              </div>
+              <div class="break-rows" data-table="region"></div>
+            </div>
+
+            <div class="break-block">
+              <div class="break-head">
+                <strong>Age &amp; gender breakdown</strong>
+                <button type="button" class="button secondary sm" data-add-row="age">Add row</button>
+              </div>
+              <div class="break-cols">
+                <span>Age &amp; gender</span><span>Impressions</span><span>Reach</span><span>Clicks</span><span></span>
+              </div>
+              <div class="break-rows" data-table="age"></div>
+            </div>
+          </div>
+        </section>
+
+        <!-- 02 · Ad previews -->
+        <section class="client-form-card">
+          <header class="client-section-header">
+            <span>02</span>
+            <div>
+              <h2>Ad previews</h2>
+              <p>
+                Screenshots of the live ad in the mobile and desktop feeds. Capture them from Meta, or
+                upload your own — a manual upload simply replaces the captured one.
+              </p>
+            </div>
+          </header>
+          <div class="client-review-area">
+            <div class="client-pull-strip">
+              <div class="client-pull-status">
+                <span></span>
+                <div>
+                  <strong>Feed preview capture</strong>
+                  <small>Screenshots the campaign's first active ad in both formats.</small>
+                </div>
+              </div>
+              <button type="button" class="client-pull-button" id="capture-previews">
+                {previewMobile || previewDesktop ? "Re-capture previews" : "Capture previews"}
+              </button>
+            </div>
+            <div id="preview-warnings"></div>
+
+            <div class="preview-grid">
+              <div class="upload-slot">
+                <strong>Mobile feed</strong>
+                {previewMobile ? (
+                  <img class="slot-thumb slot-thumb-tall" data-preview-thumb="ad_preview_mobile" src={assetUrl(previewMobile)} alt="Mobile ad preview" />
+                ) : (
+                  <div class="slot-empty" data-preview-empty="ad_preview_mobile">No capture yet</div>
+                )}
+                <img class="slot-thumb slot-thumb-tall" data-preview-thumb-new="ad_preview_mobile" alt="Mobile ad preview" hidden />
+                <label class="slot-file">
+                  Upload manually
+                  <input type="file" accept="image/jpeg,image/png,image/webp" data-upload-kind="ad_preview_mobile" />
+                </label>
+              </div>
+              <div class="upload-slot">
+                <strong>Desktop feed</strong>
+                {previewDesktop ? (
+                  <img class="slot-thumb slot-thumb-tall" data-preview-thumb="ad_preview_desktop" src={assetUrl(previewDesktop)} alt="Desktop ad preview" />
+                ) : (
+                  <div class="slot-empty" data-preview-empty="ad_preview_desktop">No capture yet</div>
+                )}
+                <img class="slot-thumb slot-thumb-tall" data-preview-thumb-new="ad_preview_desktop" alt="Desktop ad preview" hidden />
+                <label class="slot-file">
+                  Upload manually
+                  <input type="file" accept="image/jpeg,image/png,image/webp" data-upload-kind="ad_preview_desktop" />
+                </label>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- 03 · Listing photos -->
+        <section class="client-form-card">
+          <header class="client-section-header">
+            <span>03</span>
+            <div>
+              <h2>Listing photos</h2>
+              <p>
+                Click a photo once to make it the HERO, click others to number up to 6 gallery picks.
+                Click again to unselect. Post photos are reusable here.
+              </p>
+            </div>
+          </header>
+          <div class="client-review-area">
+            {photoAssets.length > 0 ? (
+              <div class="photo-grid" id="photo-grid">
+                {photoAssets.map((asset) => (
+                  <button type="button" class="photo-pick" data-asset-id={asset.id}>
+                    <img src={assetUrl(asset)} alt={asset.original_name} loading="lazy" />
+                    <span class="pick-badge" hidden></span>
+                  </button>
+                ))}
+              </div>
+            ) : (
+              <div class="empty-state">
+                <strong>No photos yet</strong>
+                <p>Upload listing photos below (or add post photos in the post editor).</p>
+              </div>
+            )}
+            <div class="drop-zone" id="gallery-drop" data-paste-kind="gallery" tabindex="0">
+              <strong>Upload listing photos</strong>
+              <span>Click to browse, drag &amp; drop, or click here then Ctrl+V to paste. Images are downscaled to 2000px automatically.</span>
+              <input type="file" id="gallery-file" accept="image/jpeg,image/png,image/webp" multiple hidden />
+            </div>
+            <p class="pick-summary" id="pick-summary">No HERO picked · 0 / 6 gallery photos.</p>
+          </div>
+        </section>
+
+        <!-- 04 · REALTOR.ca stats -->
+        <section class="client-form-card">
+          <header class="client-section-header">
+            <span>04</span>
+            <div>
+              <h2>REALTOR.ca stats</h2>
+              <p>
+                Screenshot the 7 / 30 / 90 day views from the REALTOR.ca listing stats (Win+Shift+S, then
+                paste). Automated Realtor.ca capture is planned (phase 2).
+              </p>
+            </div>
+          </header>
+          <div class="client-review-area">
+            <div class="preview-grid realtor-grid">
+              {realtorSlots.map((slot) => (
+                <div class="upload-slot">
+                  <strong>{slot.label}</strong>
+                  {slot.entry ? (
+                    <img class="slot-thumb" src={assetUrl(slot.entry)} alt={`REALTOR.ca ${slot.label} screenshot`} />
+                  ) : (
+                    <div class="slot-empty">No screenshot yet</div>
+                  )}
+                  <button type="button" class="button secondary sm paste-target" data-paste-kind={slot.kind}>
+                    Click, then Ctrl+V
+                  </button>
+                  <label class="slot-file">
+                    Or upload a file
+                    <input type="file" accept="image/jpeg,image/png,image/webp" data-upload-kind={slot.kind} />
+                  </label>
+                </div>
+              ))}
+            </div>
+
+            <div class="insights-extra">
+              <strong>Ads Manager screenshots (optional, adds In-Depth Data pages)</strong>
+              {insightsShots.length > 0 && (
+                <div class="insights-thumbs">
+                  {insightsShots.map((asset) => (
+                    <img class="slot-thumb" src={assetUrl(asset)} alt={asset.original_name} loading="lazy" />
+                  ))}
+                </div>
+              )}
+              <button type="button" class="button secondary sm paste-target" data-paste-kind="insights_screenshot">
+                Click, then Ctrl+V
+              </button>
+              <label class="slot-file">
+                Or upload files
+                <input type="file" accept="image/jpeg,image/png,image/webp" data-upload-kind="insights_screenshot" multiple />
+              </label>
+            </div>
+          </div>
+        </section>
+
+        <!-- 05 · Prepared by -->
+        <section class="client-form-card">
+          <header class="client-section-header">
+            <span>05</span>
+            <div>
+              <h2>Prepared by</h2>
+              <p>Shown on the report's disclaimer page and footer. Edit freely before generating.</p>
+            </div>
+          </header>
+          <div class="client-review-area">
+            <div class="client-field-grid two">
+              <label class="client-field">
+                <span>Prepared by</span>
+                <input type="text" name="prepared_by" value={brokerage?.name ?? ""} maxlength="120" />
+              </label>
+              <label class="client-field">
+                <span>Website</span>
+                <input type="text" name="website" value={brokerage?.website ?? ""} maxlength="200" />
+              </label>
+              <label class="client-field wide">
+                <span>Brokerage address</span>
+                <input type="text" name="brokerage_address" value={addressLine} maxlength="240" />
+              </label>
+              <label class="client-field wide">
+                <span>Contact</span>
+                <input type="text" name="contact_line" value={contactLine} maxlength="160" />
+              </label>
+            </div>
+          </div>
+        </section>
+
+        <!-- Submit -->
+        <section class="client-submit-panel submit-stack">
+          <div class="submit-checks">
+            <label class="client-approval">
+              <input type="checkbox" name="approved" value="yes" required />
+              I have reviewed the stats, screenshots, and photos above.
+            </label>
+            {anyRealtorMissing && (
+              <label class="client-approval waiver">
+                <input type="checkbox" name="waive_realtor" value="yes" />
+                Generate without REALTOR.ca pages
+              </label>
+            )}
+          </div>
+          <div class="submit-actions">
+            {existingSnapshotId && (
+              <a class="button secondary" href={`/reports/${existingSnapshotId}`}>View current report</a>
+            )}
+            <button type="submit" class="client-submit-button">
+              {existingSnapshotId ? "Regenerate Executive Report" : "Generate Executive Report"}
+            </button>
+          </div>
+        </section>
+      </form>
+    </main>
+  ) : (
+    <main class="form-shell">
+      <section class="panel">
+        <p class="eyebrow">Missing request</p>
+        <h1>Request not found</h1>
+        <p>No ad request exists for <code>{requestId}</code>.</p>
+        <a class="button primary" href="/">Back to the board</a>
+      </section>
+    </main>
+  )}
+</AppLayout>
+
+<script>
+  // Report builder wiring: pull-to-hydrate (never writes the snapshot), asset
+  // uploads with paste routing, hero/gallery picking, and editable breakdown
+  // tables serialized into hidden JSON fields at submit. Form state survives
+  // upload reloads via sessionStorage.
+  const form = document.getElementById("report-form") as HTMLFormElement | null;
+
+  if (form) {
+    // Captured non-null reference for the nested helper functions below (TS
+    // does not narrow `form` across hoisted function declarations).
+    const formEl: HTMLFormElement = form;
+    const requestId = form.dataset.requestId ?? "";
+    const stateKey = `report-builder-${requestId}`;
+
+    const impressions = document.getElementById("impressions") as HTMLInputElement;
+    const reach = document.getElementById("reach") as HTMLInputElement;
+    const clicksAll = document.getElementById("clicks_all") as HTMLInputElement;
+    const insightsSource = document.getElementById("insights_source") as HTMLInputElement;
+    const regionJson = document.getElementById("region_json") as HTMLInputElement;
+    const ageJson = document.getElementById("age_gender_json") as HTMLInputElement;
+    const heroInput = document.getElementById("hero_id") as HTMLInputElement;
+    const galleryInput = document.getElementById("gallery_ids") as HTMLInputElement;
+    const sourceBadge = document.getElementById("stats-source") as HTMLElement;
+    const statsWarnings = document.getElementById("stats-warnings") as HTMLElement;
+    const previewWarnings = document.getElementById("preview-warnings") as HTMLElement;
+    const pickSummary = document.getElementById("pick-summary") as HTMLElement;
+    const regionTable = document.querySelector('[data-table="region"]') as HTMLElement;
+    const ageTable = document.querySelector('[data-table="age"]') as HTMLElement;
+
+    type Row = { key: string; impressions: number; reach: number; clicks: number };
+
+    const sourceLabel = (source: string) =>
+      source === "meta_api" ? "Meta API" : source === "mock" ? "Mock" : "Manual";
+
+    function renderWarnings(container: HTMLElement, warnings: string[]) {
+      container.innerHTML = "";
+      for (const warning of warnings.filter(Boolean)) {
+        const p = document.createElement("p");
+        p.className = "import-fetch-notice";
+        p.textContent = warning;
+        container.appendChild(p);
+      }
+    }
+
+    // --- Breakdown tables -------------------------------------------------
+    function addRow(table: HTMLElement, row?: Partial<Row>) {
+      const wrap = document.createElement("div");
+      wrap.className = "break-row";
+      const key = document.createElement("input");
+      key.type = "text";
+      key.className = "bk";
+      key.placeholder = table === regionTable ? "e.g. Whitehorse, Yukon" : "e.g. 35-44 · female";
+      key.value = row?.key ?? "";
+      wrap.appendChild(key);
+      for (const [cls, value] of [
+        ["bi", row?.impressions],
+        ["br", row?.reach],
+        ["bc", row?.clicks]
+      ] as const) {
+        const input = document.createElement("input");
+        input.type = "number";
+        input.min = "0";
+        input.step = "1";
+        input.className = cls;
+        input.value = value === undefined || value === null ? "" : String(value);
+        wrap.appendChild(input);
+      }
+      const remove = document.createElement("button");
+      remove.type = "button";
+      remove.className = "row-remove";
+      remove.setAttribute("aria-label", "Remove row");
+      remove.textContent = "×";
+      remove.addEventListener("click", () => {
+        wrap.remove();
+        saveState();
+      });
+      wrap.appendChild(remove);
+      table.appendChild(wrap);
+    }
+
+    function readRows(table: HTMLElement): Row[] {
+      return Array.from(table.querySelectorAll(".break-row"))
+        .map((row) => ({
+          key: (row.querySelector(".bk") as HTMLInputElement).value.trim(),
+          impressions: Number((row.querySelector(".bi") as HTMLInputElement).value) || 0,
+          reach: Number((row.querySelector(".br") as HTMLInputElement).value) || 0,
+          clicks: Number((row.querySelector(".bc") as HTMLInputElement).value) || 0
+        }))
+        .filter((row) => row.key);
+    }
+
+    function setRows(table: HTMLElement, rows: Row[]) {
+      table.innerHTML = "";
+      for (const row of rows) addRow(table, row);
+    }
+
+    document.querySelectorAll("[data-add-row]").forEach((button) => {
+      button.addEventListener("click", () => {
+        addRow(button.getAttribute("data-add-row") === "region" ? regionTable : ageTable);
+      });
+    });
+
+    // --- Hero / gallery picking -------------------------------------------
+    let heroId = "";
+    let galleryIds: string[] = [];
+    const picks = Array.from(document.querySelectorAll(".photo-pick")) as HTMLButtonElement[];
+
+    function applyPicks() {
+      heroInput.value = heroId;
+      galleryInput.value = galleryIds.join(",");
+      for (const pick of picks) {
+        const id = pick.dataset.assetId ?? "";
+        const badge = pick.querySelector(".pick-badge") as HTMLElement;
+        const galleryIndex = galleryIds.indexOf(id);
+        if (id === heroId) {
+          pick.className = "photo-pick is-hero";
+          badge.hidden = false;
+          badge.textContent = "HERO";
+        } else if (galleryIndex >= 0) {
+          pick.className = "photo-pick is-gallery";
+          badge.hidden = false;
+          badge.textContent = String(galleryIndex + 1);
+        } else {
+          pick.className = "photo-pick";
+          badge.hidden = true;
+        }
+      }
+      pickSummary.textContent = `${heroId ? "HERO picked" : "No HERO picked"} · ${galleryIds.length} / 6 gallery photos.`;
+    }
+
+    for (const pick of picks) {
+      pick.addEventListener("click", () => {
+        const id = pick.dataset.assetId ?? "";
+        if (id === heroId) {
+          heroId = "";
+        } else if (galleryIds.includes(id)) {
+          galleryIds = galleryIds.filter((g) => g !== id);
+        } else if (!heroId) {
+          heroId = id;
+        } else if (galleryIds.length < 6) {
+          galleryIds.push(id);
+        } else {
+          alert("The gallery already has 6 photos — unselect one first.");
+          return;
+        }
+        applyPicks();
+        saveState();
+      });
+    }
+
+    // --- State preservation across upload reloads ---------------------------
+    function saveState() {
+      const state = {
+        impressions: impressions.value,
+        reach: reach.value,
+        clicks: clicksAll.value,
+        source: insightsSource.value,
+        badge: sourceBadge.textContent,
+        region: readRows(regionTable),
+        age: readRows(ageTable),
+        hero: heroId,
+        gallery: galleryIds,
+        fields: {} as Record<string, string>
+      };
+      for (const name of ["prepared_by", "website", "brokerage_address", "contact_line"]) {
+        const input = formEl.elements.namedItem(name) as HTMLInputElement | null;
+        if (input) state.fields[name] = input.value;
+      }
+      try {
+        sessionStorage.setItem(stateKey, JSON.stringify(state));
+      } catch {
+        /* storage full/blocked — state loss on reload is acceptable */
+      }
+    }
+
+    function restoreState() {
+      let raw: string | null = null;
+      try {
+        raw = sessionStorage.getItem(stateKey);
+      } catch {
+        return;
+      }
+      if (!raw) return;
+      try {
+        const state = JSON.parse(raw);
+        if (state.impressions) impressions.value = state.impressions;
+        if (state.reach) reach.value = state.reach;
+        if (state.clicks) clicksAll.value = state.clicks;
+        if (state.source) insightsSource.value = state.source;
+        if (state.badge) sourceBadge.textContent = state.badge;
+        if (Array.isArray(state.region)) setRows(regionTable, state.region);
+        if (Array.isArray(state.age)) setRows(ageTable, state.age);
+        const validIds = new Set(picks.map((pick) => pick.dataset.assetId ?? ""));
+        if (typeof state.hero === "string" && validIds.has(state.hero)) heroId = state.hero;
+        if (Array.isArray(state.gallery)) {
+          galleryIds = state.gallery.filter((id: string) => validIds.has(id)).slice(0, 6);
+        }
+        for (const [name, value] of Object.entries(state.fields ?? {})) {
+          const input = formEl.elements.namedItem(name) as HTMLInputElement | null;
+          if (input && typeof value === "string") input.value = value;
+        }
+      } catch {
+        /* corrupt state — start clean */
+      }
+    }
+
+    form.addEventListener("input", () => saveState());
+
+    // --- Uploads (file pick, drag & drop, paste) ----------------------------
+    async function downscale(file: File): Promise<File> {
+      if (!/^image\/(jpeg|png|webp)$/.test(file.type)) return file;
+      try {
+        const bitmap = await createImageBitmap(file);
+        const max = 2000;
+        const scale = Math.min(1, max / Math.max(bitmap.width, bitmap.height));
+        if (scale === 1 && file.size < 3_000_000) return file;
+        const canvas = document.createElement("canvas");
+        canvas.width = Math.max(1, Math.round(bitmap.width * scale));
+        canvas.height = Math.max(1, Math.round(bitmap.height * scale));
+        const ctx = canvas.getContext("2d");
+        if (!ctx) return file;
+        ctx.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+        const blob: Blob | null = await new Promise((resolve) =>
+          canvas.toBlob(resolve, "image/jpeg", 0.85)
+        );
+        if (!blob) return file;
+        return new File([blob], file.name.replace(/\.\w+$/, "") + ".jpg", { type: "image/jpeg" });
+      } catch {
+        return file;
+      }
+    }
+
+    async function uploadFiles(kind: string, files: File[]) {
+      if (!files.length) return;
+      let uploaded = false;
+      for (const original of files) {
+        // Gallery photos get the post-editor downscale (≤2000px JPEG q0.85);
+        // screenshots go up as-is (6MB report cap is generous for those).
+        const file = kind === "gallery" ? await downscale(original) : original;
+        const body = new FormData();
+        body.set("kind", kind);
+        body.set("file", file, file.name);
+        try {
+          const response = await fetch(`/api/requests/${requestId}/upload`, { method: "POST", body });
+          if (!response.ok) {
+            alert(await response.text().catch(() => "Upload failed."));
+          } else {
+            uploaded = true;
+          }
+        } catch {
+          alert("Upload failed — check the connection and try again.");
+        }
+      }
+      if (uploaded) {
+        saveState();
+        location.reload();
+      }
+    }
+
+    document.querySelectorAll("[data-upload-kind]").forEach((element) => {
+      const input = element as HTMLInputElement;
+      input.addEventListener("change", () => {
+        uploadFiles(input.dataset.uploadKind ?? "", Array.from(input.files ?? []));
+      });
+    });
+
+    // Paste routing: clipboard images land in the slot whose paste target was
+    // clicked last (Win+Shift+S → click a slot → Ctrl+V).
+    let pasteKind = "";
+    const pasteTargets = Array.from(document.querySelectorAll("[data-paste-kind]")) as HTMLElement[];
+    function armPasteTarget(target: HTMLElement) {
+      pasteKind = target.dataset.pasteKind ?? "";
+      for (const other of pasteTargets) other.classList.toggle("is-armed", other === target);
+    }
+    for (const target of pasteTargets) {
+      target.addEventListener("click", () => armPasteTarget(target));
+    }
+
+    document.addEventListener("paste", (event) => {
+      if (!pasteKind) return;
+      const items = Array.from(event.clipboardData?.items ?? []);
+      const files: File[] = [];
+      for (const item of items) {
+        if (item.type.startsWith("image/")) {
+          const file = item.getAsFile();
+          if (file) files.push(new File([file], `paste-${Date.now()}.png`, { type: file.type }));
+        }
+      }
+      if (files.length) {
+        event.preventDefault();
+        uploadFiles(pasteKind, files);
+      }
+    });
+
+    // Gallery dropzone: click to browse, drag & drop, and paste (armed above).
+    const dropZone = document.getElementById("gallery-drop");
+    const galleryFile = document.getElementById("gallery-file") as HTMLInputElement | null;
+    dropZone?.addEventListener("click", () => galleryFile?.click());
+    dropZone?.addEventListener("dragover", (event) => {
+      event.preventDefault();
+      dropZone.classList.add("is-over");
+    });
+    dropZone?.addEventListener("dragleave", () => dropZone.classList.remove("is-over"));
+    dropZone?.addEventListener("drop", (event) => {
+      event.preventDefault();
+      dropZone.classList.remove("is-over");
+      const files = Array.from(event.dataTransfer?.files ?? []).filter((file) =>
+        file.type.startsWith("image/")
+      );
+      uploadFiles("gallery", files);
+    });
+    galleryFile?.addEventListener("change", () => {
+      uploadFiles("gallery", Array.from(galleryFile.files ?? []));
+    });
+
+    // --- Pull ad stats -------------------------------------------------------
+    const pullButton = document.getElementById("pull-stats") as HTMLButtonElement | null;
+    pullButton?.addEventListener("click", async () => {
+      pullButton.disabled = true;
+      const label = pullButton.textContent;
+      pullButton.textContent = "Pulling…";
+      try {
+        const response = await fetch(`/api/requests/${requestId}/pull-report`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ mode: "stats" })
+        });
+        const data = await response.json();
+        if (!response.ok) {
+          renderWarnings(statsWarnings, [data?.error ?? "Pull failed."]);
+          return;
+        }
+        const insights = data.insights ?? {};
+        const breakdowns = data.breakdowns ?? {};
+        impressions.value = String(insights.impressions ?? 0);
+        reach.value = String(insights.reach ?? 0);
+        clicksAll.value = String(insights.clicks_all ?? 0);
+        insightsSource.value = insights.source ?? "manual";
+        sourceBadge.textContent = sourceLabel(insights.source ?? "manual");
+        setRows(regionTable, Array.isArray(breakdowns.region) ? breakdowns.region : []);
+        setRows(ageTable, Array.isArray(breakdowns.age_gender) ? breakdowns.age_gender : []);
+        renderWarnings(statsWarnings, [insights.warning, breakdowns.warning].filter(Boolean));
+        saveState();
+      } catch {
+        renderWarnings(statsWarnings, ["Pull failed — check the connection and try again."]);
+      } finally {
+        pullButton.disabled = false;
+        pullButton.textContent = label;
+      }
+    });
+
+    // --- Capture previews ----------------------------------------------------
+    const captureButton = document.getElementById("capture-previews") as HTMLButtonElement | null;
+    captureButton?.addEventListener("click", async () => {
+      captureButton.disabled = true;
+      const label = captureButton.textContent;
+      captureButton.textContent = "Capturing… (up to a minute)";
+      try {
+        const response = await fetch(`/api/requests/${requestId}/pull-report`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ mode: "previews" })
+        });
+        const data = await response.json();
+        if (!response.ok) {
+          renderWarnings(previewWarnings, [data?.error ?? "Capture failed."]);
+          return;
+        }
+        renderWarnings(previewWarnings, Array.isArray(data.warnings) ? data.warnings : []);
+        for (const [slot, entry] of [
+          ["ad_preview_mobile", data.mobile],
+          ["ad_preview_desktop", data.desktop]
+        ] as const) {
+          if (!entry?.id) continue;
+          const src = `/api/uploads/${requestId}/${entry.id}?v=${Date.now()}`;
+          const existing = document.querySelector(`[data-preview-thumb="${slot}"]`) as HTMLImageElement | null;
+          const fresh = document.querySelector(`[data-preview-thumb-new="${slot}"]`) as HTMLImageElement | null;
+          const empty = document.querySelector(`[data-preview-empty="${slot}"]`) as HTMLElement | null;
+          if (existing) {
+            existing.src = src;
+          } else if (fresh) {
+            fresh.src = src;
+            fresh.hidden = false;
+            if (empty) empty.hidden = true;
+          }
+        }
+        captureButton.textContent = "Re-capture previews";
+        return;
+      } catch {
+        renderWarnings(previewWarnings, ["Capture failed — check the connection and try again."]);
+      } finally {
+        captureButton.disabled = false;
+        if (captureButton.textContent?.startsWith("Capturing")) captureButton.textContent = label;
+      }
+    });
+
+    // --- Submit ---------------------------------------------------------------
+    form.addEventListener("submit", (event) => {
+      regionJson.value = JSON.stringify(readRows(regionTable));
+      ageJson.value = JSON.stringify(readRows(ageTable));
+      if (!heroInput.value) {
+        event.preventDefault();
+        alert("Pick a HERO photo in section 03 first.");
+        return;
+      }
+      if (galleryIds.length !== 6) {
+        event.preventDefault();
+        alert(`Pick exactly 6 gallery photos in section 03 (currently ${galleryIds.length}).`);
+        return;
+      }
+      try {
+        sessionStorage.removeItem(stateKey);
+      } catch {
+        /* ignore */
+      }
+    });
+
+    // Boot: restore any in-progress state, then paint the picks.
+    restoreState();
+    applyPicks();
+  }
+</script>
+
+<style>
+  .stats-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .field-note {
+    color: var(--ss-muted);
+    font-size: 0.76rem;
+    font-weight: 500;
+    line-height: 1.5;
+  }
+
+  /* Breakdown row editors */
+  .break-block {
+    display: grid;
+    gap: 8px;
+    border-top: 1px solid var(--ss-border);
+    padding-top: 16px;
+  }
+
+  .break-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+  }
+
+  .break-head strong {
+    color: var(--ss-ink);
+    font-size: 0.9rem;
+    font-weight: 700;
+  }
+
+  .break-cols,
+  .break-block :global(.break-row) {
+    display: grid;
+    grid-template-columns: minmax(0, 1.6fr) repeat(3, minmax(0, 0.8fr)) 34px;
+    gap: 8px;
+    align-items: center;
+  }
+
+  .break-cols span {
+    color: var(--ss-muted);
+    font-size: 0.7rem;
+    font-weight: 700;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+  }
+
+  .break-rows {
+    display: grid;
+    gap: 8px;
+  }
+
+  .break-rows:empty::after {
+    content: "No rows yet — pull ad stats or add rows manually.";
+    color: var(--ss-muted);
+    font-size: 0.82rem;
+    font-weight: 500;
+  }
+
+  .break-block :global(.break-row input) {
+    min-height: 38px;
+    padding: 0.4rem 0.6rem;
+    font-size: 0.88rem;
+  }
+
+  .break-block :global(.row-remove) {
+    display: inline-flex;
+    width: 34px;
+    height: 38px;
+    align-items: center;
+    justify-content: center;
+    border: 1px solid var(--ss-border-strong);
+    border-radius: var(--ss-radius-sm);
+    background: var(--ss-surface);
+    color: var(--ss-muted);
+    font-size: 1rem;
+    cursor: pointer;
+  }
+
+  .break-block :global(.row-remove:hover) {
+    border-color: #dc2626;
+    color: #dc2626;
+  }
+
+  /* Upload slots (previews, realtor) */
+  .preview-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 14px;
+  }
+
+  .realtor-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .upload-slot {
+    display: grid;
+    align-content: start;
+    gap: 8px;
+    border: 1px solid var(--ss-border);
+    border-radius: var(--ss-radius);
+    background: var(--ss-bg);
+    padding: 12px;
+  }
+
+  .upload-slot > strong {
+    color: var(--ss-ink);
+    font-size: 0.84rem;
+    font-weight: 700;
+  }
+
+  .slot-thumb {
+    display: block;
+    width: 100%;
+    max-height: 220px;
+    object-fit: contain;
+    border: 1px solid var(--ss-border);
+    border-radius: var(--ss-radius-sm);
+    background: #ffffff;
+  }
+
+  .slot-thumb-tall {
+    max-height: 300px;
+  }
+
+  .slot-thumb[hidden] {
+    display: none;
+  }
+
+  .slot-empty {
+    display: grid;
+    place-items: center;
+    min-height: 110px;
+    border: 1.5px dashed var(--ss-border-strong);
+    border-radius: var(--ss-radius-sm);
+    color: var(--ss-muted);
+    font-size: 0.8rem;
+    font-weight: 600;
+  }
+
+  .slot-empty[hidden] {
+    display: none;
+  }
+
+  .slot-file {
+    display: grid;
+    gap: 5px;
+    color: var(--ss-muted);
+    font-size: 0.76rem;
+    font-weight: 600;
+  }
+
+  .slot-file input {
+    padding: 0.35rem;
+    font-size: 0.8rem;
+  }
+
+  .paste-target.is-armed {
+    border-color: var(--ss-accent);
+    color: var(--ss-accent-ink);
+    box-shadow: 0 0 0 3px var(--ss-accent-soft);
+  }
+
+  /* Photo picking */
+  .photo-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+    gap: 10px;
+  }
+
+  .photo-pick {
+    position: relative;
+    display: block;
+    overflow: hidden;
+    aspect-ratio: 4 / 3;
+    border: 2px solid var(--ss-border);
+    border-radius: var(--ss-radius-sm);
+    background: var(--ss-bg);
+    padding: 0;
+    cursor: pointer;
+    transition: border-color 140ms ease, box-shadow 140ms ease;
+  }
+
+  .photo-pick img {
+    display: block;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+  }
+
+  .photo-pick:hover {
+    border-color: var(--ss-accent);
+  }
+
+  .photo-pick.is-hero {
+    border-color: var(--ss-accent-deep);
+    box-shadow: 0 0 0 3px var(--ss-accent-soft);
+  }
+
+  .photo-pick.is-gallery {
+    border-color: var(--ss-ink);
+  }
+
+  .pick-badge {
+    position: absolute;
+    top: 6px;
+    left: 6px;
+    display: inline-flex;
+    min-width: 24px;
+    height: 24px;
+    align-items: center;
+    justify-content: center;
+    border-radius: 999px;
+    background: var(--ss-ink);
+    color: #ffffff;
+    padding: 0 7px;
+    font-size: 0.68rem;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+  }
+
+  .photo-pick.is-hero .pick-badge {
+    background: var(--ss-accent-deep);
+  }
+
+  .drop-zone {
+    display: grid;
+    justify-items: center;
+    gap: 4px;
+    border: 1.5px dashed var(--ss-border-strong);
+    border-radius: var(--ss-radius);
+    padding: 22px 16px;
+    text-align: center;
+    cursor: pointer;
+    transition: border-color 140ms ease, background 140ms ease;
+  }
+
+  .drop-zone:hover,
+  .drop-zone.is-over,
+  .drop-zone.is-armed {
+    border-color: var(--ss-accent);
+    background: var(--ss-accent-soft);
+  }
+
+  .drop-zone strong {
+    color: var(--ss-ink);
+    font-size: 0.9rem;
+  }
+
+  .drop-zone span {
+    color: var(--ss-muted);
+    font-size: 0.8rem;
+    font-weight: 500;
+  }
+
+  .pick-summary {
+    margin: 0;
+    color: var(--ss-text-soft);
+    font-size: 0.85rem;
+    font-weight: 600;
+  }
+
+  .insights-extra {
+    display: grid;
+    justify-items: start;
+    gap: 8px;
+    border-top: 1px solid var(--ss-border);
+    padding-top: 16px;
+  }
+
+  .insights-extra > strong {
+    color: var(--ss-ink);
+    font-size: 0.86rem;
+    font-weight: 700;
+  }
+
+  .insights-thumbs {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+    gap: 10px;
+    width: 100%;
+  }
+
+  .insights-thumbs .slot-thumb {
+    max-height: 120px;
+  }
+
+  /* Submit panel */
+  .submit-stack {
+    align-items: center;
+  }
+
+  .submit-checks {
+    display: grid;
+    gap: 10px;
+  }
+
+  .submit-actions {
+    display: flex;
+    flex: 0 0 auto;
+    align-items: center;
+    gap: 10px;
+  }
+
+  @media (max-width: 980px) {
+    .stats-grid,
+    .realtor-grid {
+      grid-template-columns: 1fr;
+    }
+
+    .preview-grid {
+      grid-template-columns: 1fr;
+    }
+
+    .break-cols,
+    .break-block :global(.break-row) {
+      grid-template-columns: minmax(0, 1.2fr) repeat(3, minmax(0, 0.9fr)) 34px;
+    }
+  }
+
+  @media (max-width: 760px) {
+    .submit-actions {
+      flex-direction: column;
+      align-items: stretch;
+      width: 100%;
+    }
+  }
+</style>

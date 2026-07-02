@@ -1,0 +1,859 @@
+---
+import AppLayout from "../../../layouts/AppLayout.astro";
+import SiteHeader from "../../../components/SiteHeader.astro";
+import { readBrokerage, readRequest } from "../../../lib/storage";
+import { HEADLINE_FLAGS } from "../../../lib/types";
+import { STATUS_LABELS } from "../../../lib/status";
+import { formatDate } from "../../../lib/format";
+
+const requestId = Astro.params.requestId ?? "";
+let request;
+try {
+  request = await readRequest(requestId);
+} catch {
+  return Astro.redirect("/");
+}
+const brokerage = await readBrokerage(request.brokerage_slug).catch(() => undefined);
+if (!brokerage) {
+  return Astro.redirect(`/requests/${request.id}`);
+}
+
+const draft = request.post;
+const photos = request.assets.filter((asset) => asset.kind === "post_photo");
+const photoIdsOnDisk = new Set(photos.map((photo) => photo.id));
+const initialSelection = draft.photo_ids.filter((id) => photoIdsOnDisk.has(id));
+const shortLink = request.short_link?.url ?? "";
+const published = request.post_published;
+
+const postApi = `/api/requests/${request.id}/post`;
+const publishApi = `/api/requests/${request.id}/publish-post`;
+const uploadApi = `/api/requests/${request.id}/upload`;
+const uploadsBase = `/api/uploads/${request.id}`;
+
+const canReady = request.status === "new_order";
+const canPublish = request.status === "post_reviewed" && !published;
+
+const savedFlag = Astro.url.searchParams.get("saved") === "1";
+const publishedFlag = Astro.url.searchParams.get("published") === "1";
+const warning = Astro.url.searchParams.get("warning") ?? "";
+
+const publishedDate = published ? formatDate(published.published_at.slice(0, 10)) : "";
+---
+
+<AppLayout title={`Post editor — ${request.listing_address}`} className="app-body">
+  <SiteHeader context="Post editor" />
+  <main class="app-shell">
+    <a class="back-link" href={`/requests/${request.id}`}>&larr; Back to request</a>
+    <header class="page-header">
+      <p class="eyebrow">Post editor &middot; {STATUS_LABELS[request.status]}</p>
+      <h1>{request.listing_address}</h1>
+      <p>Draft the Facebook post for {brokerage.name}. The preview mirrors the final text exactly as it will publish.</p>
+    </header>
+
+    {warning && <p class="notice amber" role="alert">{warning}</p>}
+    {publishedFlag && published && <p class="notice green">The post is recorded as published. 🎉</p>}
+    {savedFlag && <p class="notice green">Draft saved.</p>}
+    {
+      published && (
+        <p class="notice green">
+          Post published{published.manual && " (recorded manually)"} on {publishedDate}
+          {published.permalink_url && (
+            <>
+              {" — "}
+              <a href={published.permalink_url} target="_blank" rel="noopener">
+                View on Facebook
+              </a>
+            </>
+          )}
+        </p>
+      )
+    }
+    {
+      !shortLink && (
+        <p class="notice red">
+          Create the nowforsale.co link on the <a href={`/requests/${request.id}`}>request page</a> first — publishing
+          is disabled until it exists.
+        </p>
+      )
+    }
+
+    <div class="editor-grid">
+      <div class="editor-left">
+        <form id="post-form" method="post" action={postApi}>
+          <input type="hidden" name="dirty" id="f-dirty" value={draft.dirty ? "1" : "0"} />
+          <input type="hidden" name="photo_ids" id="f-photo-ids" value={initialSelection.join(",")} />
+
+          <section class="panel editor-panel">
+            <h2>Post details</h2>
+            <div class="client-field-grid two">
+              <label class="client-field">
+                <span>Headline flag</span>
+                <select name="headline_flag" id="f-flag">
+                  {HEADLINE_FLAGS.map((flag) => (
+                    <option value={flag} selected={flag === draft.headline_flag}>
+                      {flag}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label class="client-field">
+                <span>Price prefix</span>
+                <select name="price_prefix" id="f-prefix">
+                  <option value="Offered at" selected={draft.price_prefix !== "Now Offered at"}>Offered at</option>
+                  <option value="Now Offered at" selected={draft.price_prefix === "Now Offered at"}>
+                    Now Offered at
+                  </option>
+                </select>
+              </label>
+              <label class="client-field">
+                <span>Price (numbers only, no $)</span>
+                <input type="text" name="price" id="f-price" inputmode="numeric" placeholder="809,900" maxlength="20" value={draft.price} />
+              </label>
+              <label class="client-field">
+                <span>Neighborhood</span>
+                <input type="text" name="neighborhood" id="f-neigh" placeholder="Whistle Bend" maxlength="80" value={draft.neighborhood} />
+              </label>
+              <label class="client-field">
+                <span>Bedrooms</span>
+                <input type="number" name="beds" id="f-beds" step="0.5" min="0" value={draft.beds} />
+              </label>
+              <label class="client-field">
+                <span>Bathrooms</span>
+                <input type="number" name="baths" id="f-baths" step="0.5" min="0" value={draft.baths} />
+              </label>
+              <label class="client-field wide">
+                <span>Body — descriptive paragraphs</span>
+                <textarea name="body" id="f-body" rows="8" maxlength="2000">{draft.body}</textarea>
+              </label>
+            </div>
+
+            <div class="readonly-rows">
+              <div class="readonly-row">
+                <strong>Short link</strong>
+                <span>{shortLink || "— not created yet —"}</span>
+              </div>
+              <div class="readonly-row">
+                <strong>📞</strong>
+                <span>{brokerage.post_phone_line || "— no phone line on the brokerage profile —"}</span>
+              </div>
+              <div class="readonly-row">
+                <strong>Sign-off</strong>
+                <span>{brokerage.post_signoff || "— no sign-off on the brokerage profile —"}</span>
+              </div>
+            </div>
+          </section>
+
+          <section class="panel editor-panel">
+            <div class="final-heading">
+              <h2>Final post text</h2>
+              <button class="button secondary sm" type="button" id="regen">Regenerate from fields</button>
+            </div>
+            <p class="hint">
+              This exact text gets published. Edit it freely — manual edits are kept until you regenerate.
+            </p>
+            <textarea name="final_text" id="f-final" rows="14">{draft.final_text}</textarea>
+          </section>
+
+          <section class="panel editor-panel">
+            <div class="final-heading">
+              <h2>Photos</h2>
+              <span class="count-badge" id="pick-count">{initialSelection.length} of 10 picked</span>
+            </div>
+            <div class="dropzone" id="dropzone" tabindex="0">
+              <strong>Drop photos here, click to browse, or paste a screenshot</strong>
+              <span>JPEG / PNG / WebP — large images are downscaled in the browser before upload.</span>
+            </div>
+            <input type="file" id="file-input" multiple accept="image/jpeg,image/png,image/webp" hidden />
+            <p class="hint" id="upload-note" hidden></p>
+            {
+              photos.length > 0 ? (
+                <div class="photo-grid" id="photo-grid">
+                  {photos.map((photo) => (
+                    <button type="button" class="photo-thumb" data-id={photo.id} title={photo.original_name}>
+                      <img src={`${uploadsBase}/${photo.id}`} alt={photo.original_name} loading="lazy" />
+                      <span class="order-badge" />
+                    </button>
+                  ))}
+                </div>
+              ) : (
+                <div class="empty-state">
+                  <strong>No post photos yet</strong>
+                  <p>Upload the hand-picked listing photos — click a thumbnail afterwards to set the publish order.</p>
+                </div>
+              )
+            }
+          </section>
+
+          <div class="actions-row">
+            <button class="button secondary" type="submit" name="action" value="save">Save Draft</button>
+            {
+              canReady && (
+                <button class="button primary" type="submit" name="action" value="ready">
+                  Mark Ready for Review
+                </button>
+              )
+            }
+          </div>
+        </form>
+
+        {
+          canPublish && shortLink && (
+            <div class="panel editor-panel publish-panel">
+              <h2>Push live</h2>
+              <p class="hint">
+                Publishes the saved final text + selected photos to {brokerage.name}'s Facebook Page. Save Draft first
+                if you just changed anything.
+              </p>
+              <form method="post" action={publishApi} id="publish-form">
+                <button class="button primary" type="submit">Push Live to Facebook</button>
+              </form>
+              <form method="post" action={postApi} class="manual-row">
+                <input type="hidden" name="action" value="record_manual" />
+                <label class="client-field wide">
+                  <span>Posted it by hand in Meta? Paste the post URL</span>
+                  <input type="url" name="manual_permalink" placeholder="https://www.facebook.com/..." required />
+                </label>
+                <button class="button secondary sm" type="submit">Record manual publish</button>
+              </form>
+            </div>
+          )
+        }
+        {
+          request.status === "post_created" && (
+            <p class="notice grey">Waiting for review — approve the post from the request page to unlock publishing.</p>
+          )
+        }
+      </div>
+
+      <aside class="editor-right">
+        <p class="eyebrow">Live preview</p>
+        <div class="fb-card">
+          <div class="fb-head">
+            {
+              brokerage.logo_url ? (
+                <img class="fb-avatar" src={brokerage.logo_url} alt={brokerage.name} />
+              ) : (
+                <span class="fb-avatar fb-avatar-fallback">{brokerage.name.slice(0, 1)}</span>
+              )
+            }
+            <div>
+              <div class="fb-name">{brokerage.name}</div>
+              <div class="fb-sub">Just now · 🌐</div>
+            </div>
+          </div>
+          <div class="fb-text" id="pv-text"></div>
+          <div class="fb-grid" id="pv-grid" hidden></div>
+          <div class="fb-actions">
+            <span>👍 Like</span>
+            <span>💬 Comment</span>
+            <span>↗ Share</span>
+          </div>
+        </div>
+      </aside>
+    </div>
+  </main>
+</AppLayout>
+
+<script
+  is:inline
+  define:vars={{
+    shortLink,
+    phoneLine: brokerage.post_phone_line,
+    signoff: brokerage.post_signoff,
+    address: request.listing_address,
+    pageName: brokerage.name,
+    uploadApi,
+    uploadsBase,
+    initialSelection
+  }}
+>
+  const form = document.getElementById("post-form");
+  const flagSel = document.getElementById("f-flag");
+  const prefixSel = document.getElementById("f-prefix");
+  const priceInput = document.getElementById("f-price");
+  const bedsInput = document.getElementById("f-beds");
+  const bathsInput = document.getElementById("f-baths");
+  const neighInput = document.getElementById("f-neigh");
+  const bodyTa = document.getElementById("f-body");
+  const finalTa = document.getElementById("f-final");
+  const dirtyInput = document.getElementById("f-dirty");
+  const photoIdsInput = document.getElementById("f-photo-ids");
+  const pvText = document.getElementById("pv-text");
+  const pvGrid = document.getElementById("pv-grid");
+  const pickCount = document.getElementById("pick-count");
+  const uploadNote = document.getElementById("upload-note");
+  const dropzone = document.getElementById("dropzone");
+  const fileInput = document.getElementById("file-input");
+  const photoGrid = document.getElementById("photo-grid");
+  const publishForm = document.getElementById("publish-form");
+  const MAX_PHOTOS = 10;
+
+  // --- Caption assembly: line-by-line mirror of lib/postFormat.ts ----------
+  function assemble() {
+    const head = [];
+    const flag = flagSel.value.trim();
+    head.push(flag ? "🚨 " + flag + "!🚨 " + address : address);
+    if (shortLink) head.push(shortLink);
+
+    const price = priceInput.value.trim().replace(/^\$/, "");
+    if (price) head.push("💲 " + (prefixSel.value.trim() || "Offered at") + " $" + price);
+
+    const beds = bedsInput.value.trim();
+    const baths = bathsInput.value.trim();
+    if (beds && baths) head.push("🛏️ " + beds + " Bedrooms | 🛁 " + baths + " Bathrooms");
+    else if (beds) head.push("🛏️ " + beds + " Bedrooms");
+    else if (baths) head.push("🛁 " + baths + " Bathrooms");
+
+    const neighborhood = neighInput.value.trim();
+    if (neighborhood) head.push("📍 " + neighborhood);
+
+    const tail = [];
+    if (shortLink) tail.push("🔗 " + shortLink);
+    if (phoneLine.trim()) tail.push("📞" + phoneLine.trim());
+    if (signoff.trim()) tail.push(signoff.trim());
+
+    const body = bodyTa.value.trim();
+    return [head.join("\n"), body, tail.join("\n")].filter(Boolean).join("\n\n");
+  }
+
+  function syncPreview() {
+    pvText.textContent = finalTa.value;
+  }
+
+  function onFormInput(event) {
+    const target = event.target;
+    if (target === finalTa) {
+      dirtyInput.value = "1"; // first manual edit stops auto-assembly
+    } else if (target === fileInput) {
+      return;
+    } else {
+      if (target === flagSel && flagSel.value === "PRICE REDUCED") {
+        prefixSel.value = "Now Offered at"; // auto-suggest, still editable
+      }
+      if (dirtyInput.value !== "1") finalTa.value = assemble();
+    }
+    syncPreview();
+  }
+  form.addEventListener("input", onFormInput);
+  form.addEventListener("change", onFormInput);
+
+  document.getElementById("regen").addEventListener("click", () => {
+    dirtyInput.value = "0";
+    finalTa.value = assemble();
+    syncPreview();
+  });
+
+  // --- Photo selection: click toggles, order = publish order ----------------
+  let selection = initialSelection.slice(0, MAX_PHOTOS);
+
+  function renderSelection() {
+    if (photoGrid) {
+      for (const thumb of photoGrid.querySelectorAll(".photo-thumb")) {
+        const index = selection.indexOf(thumb.dataset.id);
+        thumb.classList.toggle("selected", index !== -1);
+        thumb.querySelector(".order-badge").textContent = index === -1 ? "" : String(index + 1);
+      }
+    }
+    photoIdsInput.value = selection.join(",");
+    if (pickCount) pickCount.textContent = selection.length + " of " + MAX_PHOTOS + " picked";
+
+    pvGrid.textContent = "";
+    for (const id of selection) {
+      const img = document.createElement("img");
+      img.src = uploadsBase + "/" + id;
+      img.alt = "";
+      pvGrid.appendChild(img);
+    }
+    pvGrid.classList.toggle("odd", selection.length % 2 === 1);
+    pvGrid.hidden = selection.length === 0;
+  }
+
+  if (photoGrid) {
+    photoGrid.addEventListener("click", (event) => {
+      const thumb = event.target.closest(".photo-thumb");
+      if (!thumb) return;
+      const id = thumb.dataset.id;
+      const index = selection.indexOf(id);
+      if (index !== -1) {
+        selection.splice(index, 1);
+      } else if (selection.length < MAX_PHOTOS) {
+        selection.push(id);
+      } else {
+        note("Maximum " + MAX_PHOTOS + " photos per post — unpick one first.", true);
+        return;
+      }
+      renderSelection();
+    });
+  }
+
+  // --- Uploads: browse / drag-drop / paste, canvas downscale first ----------
+  function note(message, isError) {
+    uploadNote.hidden = false;
+    uploadNote.textContent = message;
+    uploadNote.style.color = isError ? "#b91c1c" : "";
+  }
+
+  async function prepareFile(file) {
+    if (!/^image\/(jpeg|png|webp)$/.test(file.type)) return file; // server validates
+    const url = URL.createObjectURL(file);
+    try {
+      const img = await new Promise((resolve, reject) => {
+        const image = new Image();
+        image.onload = () => resolve(image);
+        image.onerror = reject;
+        image.src = url;
+      });
+      const longest = Math.max(img.naturalWidth, img.naturalHeight);
+      if (!longest || longest <= 2000) return file; // already small enough
+      const scale = 2000 / longest;
+      const canvas = document.createElement("canvas");
+      canvas.width = Math.round(img.naturalWidth * scale);
+      canvas.height = Math.round(img.naturalHeight * scale);
+      canvas.getContext("2d").drawImage(img, 0, 0, canvas.width, canvas.height);
+      const blob = await new Promise((resolve) => canvas.toBlob(resolve, "image/jpeg", 0.85));
+      if (!blob) return file;
+      const name = (file.name || "photo").replace(/\.[a-z0-9]+$/i, "") + ".jpg";
+      return new File([blob], name, { type: "image/jpeg" });
+    } catch {
+      return file;
+    } finally {
+      URL.revokeObjectURL(url);
+    }
+  }
+
+  let uploading = false;
+  async function uploadFiles(fileList) {
+    const files = Array.from(fileList).filter((file) => file.size > 0);
+    if (files.length === 0 || uploading) return;
+    uploading = true;
+    note("Preparing " + files.length + " photo(s)…");
+    try {
+      const body = new FormData();
+      body.append("kind", "post_photo");
+      for (const file of files) {
+        const prepared = await prepareFile(file);
+        body.append("file", prepared, prepared.name || "upload");
+      }
+      note("Uploading " + files.length + " photo(s)…");
+      const response = await fetch(uploadApi, { method: "POST", body });
+      let data = null;
+      try {
+        data = await response.json();
+      } catch {}
+      if (response.ok && data && data.ok) {
+        location.reload();
+      } else {
+        note((data && data.error) || "Upload failed — try again.", true);
+        uploading = false;
+      }
+    } catch {
+      note("Upload failed — check your connection and try again.", true);
+      uploading = false;
+    }
+  }
+
+  dropzone.addEventListener("click", () => fileInput.click());
+  dropzone.addEventListener("keydown", (event) => {
+    if (event.key === "Enter" || event.key === " ") {
+      event.preventDefault();
+      fileInput.click();
+    }
+  });
+  fileInput.addEventListener("change", () => {
+    if (fileInput.files && fileInput.files.length) uploadFiles(fileInput.files);
+  });
+  dropzone.addEventListener("dragover", (event) => {
+    event.preventDefault();
+    dropzone.classList.add("dragover");
+  });
+  dropzone.addEventListener("dragleave", () => dropzone.classList.remove("dragover"));
+  dropzone.addEventListener("drop", (event) => {
+    event.preventDefault();
+    dropzone.classList.remove("dragover");
+    if (event.dataTransfer && event.dataTransfer.files.length) uploadFiles(event.dataTransfer.files);
+  });
+  document.addEventListener("paste", (event) => {
+    const items = event.clipboardData ? event.clipboardData.items : [];
+    const files = [];
+    for (const item of items) {
+      if (item.kind === "file" && /^image\//.test(item.type)) {
+        const file = item.getAsFile();
+        if (file) files.push(new File([file], "paste-" + Date.now() + ".png", { type: file.type }));
+      }
+    }
+    if (files.length) {
+      event.preventDefault();
+      uploadFiles(files);
+    }
+  });
+
+  // --- Publish confirmation -------------------------------------------------
+  if (publishForm) {
+    publishForm.addEventListener("submit", (event) => {
+      if (!confirm("Publish this post to " + pageName + "'s Facebook Page now?")) {
+        event.preventDefault();
+      }
+    });
+  }
+
+  // --- Initial paint ---------------------------------------------------------
+  if (!finalTa.value.trim() && dirtyInput.value !== "1") {
+    finalTa.value = assemble();
+  }
+  renderSelection();
+  syncPreview();
+</script>
+
+<style>
+  .editor-grid {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 420px;
+    gap: 18px;
+    align-items: start;
+  }
+
+  .editor-left {
+    display: grid;
+    gap: 14px;
+    min-width: 0;
+  }
+
+  .editor-left form {
+    display: grid;
+    gap: 14px;
+  }
+
+  .editor-right {
+    position: sticky;
+    top: 76px;
+    display: grid;
+    gap: 10px;
+  }
+
+  .editor-panel h2 {
+    margin: 0 0 14px;
+    color: var(--ss-ink);
+    font-size: 1.1rem;
+    font-weight: 700;
+    letter-spacing: -0.01em;
+  }
+
+  .editor-panel select {
+    width: 100%;
+    min-height: 42px;
+    border: 1px solid var(--ss-border-strong);
+    border-radius: var(--ss-radius-sm);
+    background: var(--ss-surface);
+    color: var(--ss-ink);
+    font-size: 0.92rem;
+    font-weight: 500;
+    padding: 0.6rem 0.75rem;
+  }
+
+  .editor-panel select:focus {
+    border-color: var(--ss-accent);
+    box-shadow: 0 0 0 3px var(--ss-accent-soft);
+    outline: 0;
+  }
+
+  .final-heading {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    margin-bottom: 10px;
+  }
+
+  .final-heading h2 {
+    margin: 0;
+  }
+
+  .hint {
+    margin: 0 0 12px;
+    color: var(--ss-muted);
+    font-size: 0.84rem !important;
+    line-height: 1.5;
+  }
+
+  #f-final {
+    font-size: 0.92rem;
+    line-height: 1.5;
+  }
+
+  .readonly-rows {
+    display: grid;
+    gap: 8px;
+    margin-top: 16px;
+  }
+
+  .readonly-row {
+    display: flex;
+    gap: 10px;
+    align-items: baseline;
+    border: 1px solid var(--ss-border);
+    border-radius: var(--ss-radius-sm);
+    background: #f8fafc;
+    padding: 9px 12px;
+    font-size: 0.88rem;
+  }
+
+  .readonly-row strong {
+    flex: 0 0 auto;
+    color: var(--ss-text-soft);
+    font-size: 0.78rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+  }
+
+  .readonly-row span {
+    color: var(--ss-text);
+    overflow-wrap: anywhere;
+  }
+
+  .notice {
+    margin: 0 0 14px;
+    border-radius: var(--ss-radius-sm);
+    padding: 10px 14px;
+    font-size: 0.88rem;
+    font-weight: 600;
+    line-height: 1.5;
+  }
+
+  .notice a {
+    color: inherit;
+  }
+
+  .notice.green {
+    border: 1px solid #a7f3d0;
+    background: #ecfdf5;
+    color: #065f46;
+  }
+
+  .notice.amber {
+    border: 1px solid #fed7aa;
+    background: #fff7ed;
+    color: #9a3412;
+  }
+
+  .notice.red {
+    border: 1px solid #fecaca;
+    background: #fef2f2;
+    color: #b91c1c;
+  }
+
+  .notice.grey {
+    border: 1px solid var(--ss-border);
+    background: var(--ss-surface);
+    color: var(--ss-text-soft);
+  }
+
+  .dropzone {
+    display: grid;
+    gap: 4px;
+    justify-items: center;
+    border: 1.5px dashed var(--ss-border-strong);
+    border-radius: var(--ss-radius);
+    background: var(--ss-surface);
+    padding: 22px 16px;
+    text-align: center;
+    cursor: pointer;
+    transition: border-color 140ms ease, background 140ms ease;
+  }
+
+  .dropzone strong {
+    color: var(--ss-ink);
+    font-size: 0.92rem;
+  }
+
+  .dropzone span {
+    color: var(--ss-muted);
+    font-size: 0.8rem;
+  }
+
+  .dropzone:hover,
+  .dropzone.dragover {
+    border-color: var(--ss-accent);
+    background: var(--ss-accent-soft);
+  }
+
+  .photo-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(96px, 1fr));
+    gap: 10px;
+    margin-top: 14px;
+  }
+
+  .photo-thumb {
+    position: relative;
+    overflow: hidden;
+    border: 2px solid transparent;
+    border-radius: 10px;
+    background: #f1f5f9;
+    padding: 0;
+    cursor: pointer;
+    transition: border-color 140ms ease, box-shadow 140ms ease;
+  }
+
+  .photo-thumb img {
+    display: block;
+    width: 100%;
+    aspect-ratio: 1 / 1;
+    object-fit: cover;
+  }
+
+  .photo-thumb.selected {
+    border-color: var(--ss-accent);
+    box-shadow: 0 0 0 3px var(--ss-accent-soft);
+  }
+
+  .order-badge {
+    position: absolute;
+    top: 6px;
+    left: 6px;
+    display: none;
+    width: 22px;
+    height: 22px;
+    align-items: center;
+    justify-content: center;
+    border-radius: 999px;
+    background: var(--ss-accent-deep);
+    color: #ffffff;
+    font-size: 0.72rem;
+    font-weight: 700;
+  }
+
+  .photo-thumb.selected .order-badge {
+    display: inline-flex;
+  }
+
+  .actions-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
+  }
+
+  .publish-panel {
+    display: grid;
+    gap: 12px;
+  }
+
+  .publish-panel h2 {
+    margin: 0;
+  }
+
+  .publish-panel .hint {
+    margin: 0;
+  }
+
+  .manual-row {
+    display: grid;
+    gap: 10px;
+    justify-items: start;
+    border-top: 1px solid var(--ss-border);
+    padding-top: 14px;
+  }
+
+  .manual-row .client-field {
+    width: 100%;
+  }
+
+  /* --- Facebook-style preview card ---------------------------------------- */
+  .fb-card {
+    overflow: hidden;
+    border: 1px solid var(--ss-border);
+    border-radius: 12px;
+    background: #ffffff;
+    box-shadow: var(--ss-shadow-sm);
+  }
+
+  .fb-head {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 12px 14px;
+  }
+
+  .fb-avatar {
+    width: 40px;
+    height: 40px;
+    flex: 0 0 auto;
+    border-radius: 999px;
+    background: #101725;
+    object-fit: contain;
+    padding: 3px;
+  }
+
+  .fb-avatar-fallback {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    color: #ffffff;
+    font-weight: 700;
+  }
+
+  .fb-name {
+    color: #050505;
+    font-size: 0.92rem;
+    font-weight: 700;
+    line-height: 1.2;
+  }
+
+  .fb-sub {
+    color: #65676b;
+    font-size: 0.78rem;
+  }
+
+  .fb-text {
+    padding: 0 14px 12px;
+    color: #050505;
+    font-size: 0.92rem;
+    line-height: 1.45;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+  }
+
+  .fb-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 2px;
+  }
+
+  .fb-grid :global(img) {
+    display: block;
+    width: 100%;
+    aspect-ratio: 1 / 1;
+    object-fit: cover;
+    background: #f0f2f5;
+  }
+
+  .fb-grid.odd :global(img:first-child) {
+    grid-column: 1 / -1;
+    aspect-ratio: 16 / 10;
+  }
+
+  .fb-actions {
+    display: flex;
+    border-top: 1px solid #e4e6eb;
+    margin-top: 2px;
+  }
+
+  .fb-actions span {
+    flex: 1;
+    padding: 9px 0;
+    color: #65676b;
+    font-size: 0.85rem;
+    font-weight: 600;
+    text-align: center;
+  }
+
+  @media (max-width: 980px) {
+    .editor-grid {
+      grid-template-columns: 1fr;
+    }
+
+    .editor-right {
+      position: static;
+    }
+  }
+</style>

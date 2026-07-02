@@ -1,0 +1,122 @@
+---
+import AppLayout from "../layouts/AppLayout.astro";
+import SiteHeader from "../components/SiteHeader.astro";
+import KanbanCard from "../components/KanbanCard.astro";
+import { listBrokerages, listRequests } from "../lib/storage";
+import { REQUEST_STATUSES } from "../lib/types";
+import type { Brokerage } from "../lib/types";
+import { STATUS_LABELS } from "../lib/status";
+import { vancouverToday } from "../lib/dates";
+
+// Kanban board — the app home. Six fixed columns; there is no per-column
+// filtering or drag-and-drop: cards move by completing their derived task on
+// the detail page (the only card-level shortcut is "Approve post").
+const [requests, brokerages] = await Promise.all([listRequests(), listBrokerages()]);
+const bySlug = new Map<string, Brokerage>(brokerages.map((brokerage) => [brokerage.slug, brokerage]));
+const today = vancouverToday();
+
+const columns = REQUEST_STATUSES.map((status) => {
+  const cards = requests.filter((request) => request.status === status);
+  if (status === "campaign_in_progress") {
+    // The working column is a due-date queue; everything else stays newest-first.
+    cards.sort((a, b) =>
+      (a.report_due_date ?? "9999-12-31").localeCompare(b.report_due_date ?? "9999-12-31")
+    );
+  }
+  return { status, cards };
+});
+---
+
+<AppLayout title="Board | Supersonic Ad Manager" className="app-body">
+  <SiteHeader context="Board" />
+  <main class="app-shell board-shell">
+    <div class="page-header board-header">
+      <p class="eyebrow">Listing ad requests</p>
+      <h1>Board</h1>
+    </div>
+
+    <div class="board">
+      {
+        columns.map(({ status, cards }) => (
+          <section class="board-column" data-status={status}>
+            <header class="board-column-head">
+              <h2>{STATUS_LABELS[status]}</h2>
+              <span class="count-badge">{cards.length}</span>
+            </header>
+            <div class="board-column-cards">
+              {cards.length === 0 && <p class="board-empty">No requests</p>}
+              {cards.map((request) => (
+                <KanbanCard request={request} brokerage={bySlug.get(request.brokerage_slug)} today={today} />
+              ))}
+            </div>
+          </section>
+        ))
+      }
+    </div>
+  </main>
+</AppLayout>
+
+<style>
+  /* The board wants more width than the standard shell. */
+  .board-shell {
+    width: min(1720px, calc(100vw - 32px));
+  }
+
+  .board-header {
+    padding-bottom: 18px;
+  }
+
+  .board {
+    display: flex;
+    align-items: flex-start;
+    gap: 14px;
+    overflow-x: auto;
+    padding: 2px 2px 24px;
+    scroll-snap-type: x proximity;
+  }
+
+  .board-column {
+    display: grid;
+    width: 292px;
+    flex: 0 0 auto;
+    align-content: start;
+    gap: 10px;
+    border: 1px solid var(--ss-border);
+    border-radius: var(--ss-radius-lg);
+    background: rgba(255, 255, 255, 0.55);
+    padding: 12px;
+    scroll-snap-align: start;
+  }
+
+  .board-column-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    padding: 2px 2px 4px;
+  }
+
+  .board-column-head h2 {
+    margin: 0;
+    color: var(--ss-ink);
+    font-size: 0.88rem;
+    font-weight: 700;
+    letter-spacing: -0.01em;
+  }
+
+  .board-column-cards {
+    display: grid;
+    gap: 10px;
+  }
+
+  .board-empty {
+    margin: 0;
+    border: 1.5px dashed var(--ss-border-strong);
+    border-radius: var(--ss-radius-sm);
+    padding: 18px 12px;
+    color: var(--ss-muted);
+    font-size: 0.8rem;
+    font-weight: 500;
+    text-align: center;
+  }
+</style>

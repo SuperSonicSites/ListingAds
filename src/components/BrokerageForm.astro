@@ -1,0 +1,178 @@
+---
+import type { Brokerage } from "../lib/types";
+
+interface Props {
+  brokerage?: Brokerage;
+}
+
+const { brokerage } = Astro.props;
+const isEdit = Boolean(brokerage);
+// Uploaded logos are stored as data URIs — never prefill those into the URL input.
+const logoUrlValue = brokerage?.logo_url.startsWith("data:") ? "" : (brokerage?.logo_url ?? "");
+---
+
+<form class="entry-form" method="post" action="/api/brokerage" enctype="multipart/form-data">
+  <input type="hidden" name="mode" value={isEdit ? "edit" : "create"} />
+
+  <section class="form-section">
+    <h2>Brand</h2>
+    <div class="field-grid">
+      <label>
+        Brokerage name
+        <input name="name" value={brokerage?.name ?? ""} placeholder="Yukon Real Estate Connection" required />
+      </label>
+      <label>
+        Slug
+        <input
+          name="slug"
+          value={brokerage?.slug ?? ""}
+          placeholder="auto-generated from name"
+          pattern="[a-z0-9-]*"
+          readonly={isEdit}
+        />
+        <span>{isEdit ? "Slug can't be changed after creation." : "Leave blank to generate from the name. Lowercase letters, numbers, and hyphens."}</span>
+      </label>
+      <label>
+        Logo upload
+        <input type="file" name="logo_file" accept="image/png,image/jpeg,image/svg+xml,image/webp" />
+        <span>PNG, JPEG, SVG, or WebP, up to 1 MB.{isEdit && " Leave empty to keep the current logo."}</span>
+      </label>
+      <label>
+        Logo URL (alternative to upload)
+        <input name="logo_url" value={logoUrlValue} placeholder="https://brokerage.com/logo.svg" />
+      </label>
+      {isEdit && brokerage?.logo_url && (
+        <div class="logo-preview">
+          <span>Current logo</span>
+          <img src={brokerage.logo_url} alt={`${brokerage.name} logo`} />
+        </div>
+      )}
+      <label>
+        Primary color
+        <input type="color" name="brand_primary" value={brokerage?.brand_primary ?? "#111111"} required />
+      </label>
+      <label>
+        Accent color
+        <input type="color" name="brand_accent" value={brokerage?.brand_accent ?? "#c9a86a"} required />
+      </label>
+    </div>
+  </section>
+
+  <section class="form-section">
+    <h2>Contact</h2>
+    <div class="field-grid">
+      <label>
+        Point person
+        <input name="contact_name" value={brokerage?.contact_name ?? ""} placeholder="Felix Robitaille" required />
+        <span>Greeted by name in every client email ("Hi Felix").</span>
+      </label>
+      <label>
+        Contact email
+        <input type="email" name="contact_email" value={brokerage?.contact_email ?? ""} placeholder="felix@brokerage.com" required />
+        <span>Receives confirmation, launch, and report-delivery emails.</span>
+      </label>
+      <label>
+        Contact phone
+        <input name="contact_phone" value={brokerage?.contact_phone ?? ""} placeholder="867-333-4663" />
+      </label>
+      <label>
+        Website
+        <input type="url" name="website" value={brokerage?.website ?? ""} placeholder="https://brokerage.com" />
+      </label>
+    </div>
+  </section>
+
+  <section class="form-section">
+    <h2>Address</h2>
+    <div class="field-grid">
+      <label class="wide">
+        Street
+        <input name="address_street" value={brokerage?.address_street ?? ""} placeholder="204 Black Street" />
+      </label>
+      <label>
+        City
+        <input name="address_city" value={brokerage?.address_city ?? ""} placeholder="Whitehorse" />
+      </label>
+      <label>
+        Province
+        <input name="address_province" value={brokerage?.address_province ?? ""} placeholder="YT" />
+      </label>
+      <label>
+        Postal code
+        <input name="address_postal" value={brokerage?.address_postal ?? ""} placeholder="Y1A 2M9" />
+      </label>
+      <label>
+        Country
+        <input name="address_country" value={brokerage?.address_country ?? "Canada"} placeholder="Canada" />
+      </label>
+    </div>
+  </section>
+
+  <section class="form-section">
+    <h2>Post settings</h2>
+    <div class="field-grid">
+      <label>
+        Post phone line
+        <input name="post_phone_line" value={brokerage?.post_phone_line ?? ""} placeholder="867-333-HOME (4663)" />
+        <span>Shown after 📞 in every Facebook post, e.g. "867-333-HOME (4663)".</span>
+      </label>
+      <label>
+        Post sign-off
+        <input name="post_signoff" value={brokerage?.post_signoff ?? ""} placeholder="Felix & Rachel - Yukon's Real Estate Connection" />
+        <span>The last line of every post.</span>
+      </label>
+    </div>
+  </section>
+
+  <section class="form-section">
+    <h2>Meta integration (optional)</h2>
+    <div class="field-grid">
+      <label>
+        Facebook Page ID
+        <input name="meta_page_id" value={brokerage?.meta_page_id ?? ""} pattern="[0-9]*" inputmode="numeric" />
+        <span>The page listing posts are published to.</span>
+      </label>
+      <label>
+        Meta ad account ID
+        <input name="meta_ad_account_id" value={brokerage?.meta_ad_account_id ?? ""} placeholder="1234567890 or act_1234567890" />
+        <span>Digits only — a pasted "act_" prefix is stripped automatically.</span>
+      </label>
+    </div>
+  </section>
+
+  {isEdit && (
+    <section class="form-section">
+      <h2>Intake link</h2>
+      <div class="field-grid">
+        <label class="regen-check">
+          <span class="regen-row">
+            <input type="checkbox" name="regenerate_token" value="1" />
+            Regenerate intake link
+          </span>
+          <span>Mints a new secret intake URL for this brokerage. The old link stops working immediately — only check this if the current link leaked.</span>
+        </label>
+      </div>
+    </section>
+  )}
+
+  <div class="form-actions">
+    <button class="button primary" type="submit">{isEdit ? "Save changes" : "Create brokerage"}</button>
+  </div>
+</form>
+
+<style>
+  .regen-check .regen-row {
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+    color: var(--ss-ink);
+    font-size: 0.9rem;
+    font-weight: 600;
+  }
+
+  .regen-check input[type="checkbox"] {
+    width: 18px;
+    height: 18px;
+    accent-color: var(--ss-accent-ink);
+  }
+</style>

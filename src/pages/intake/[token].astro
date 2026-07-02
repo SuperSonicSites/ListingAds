@@ -1,0 +1,472 @@
+---
+import AppLayout from "../../layouts/AppLayout.astro";
+import { findBrokerageByToken } from "../../lib/storage";
+
+const token = Astro.params.token ?? "";
+const brokerage = /^[a-f0-9]{32}$/.test(token) ? await findBrokerageByToken(token) : undefined;
+if (!brokerage) {
+  Astro.response.status = 404;
+}
+
+const brandStyle = brokerage
+  ? `--brand-primary: ${brokerage.brand_primary}; --brand-accent: ${brokerage.brand_accent};`
+  : "";
+---
+
+<AppLayout
+  title={brokerage ? `Ad Campaign Request | ${brokerage.name}` : "Link not active"}
+  className="client-form-body"
+>
+  {brokerage ? (
+    <div class="intake-shell" style={brandStyle}>
+      <header class="intake-brand">
+        <img class="intake-brand-logo" src={brokerage.logo_url} alt={`${brokerage.name} logo`} />
+        <p class="intake-brand-line">Ad Campaign Request — powered by Supersonic Sites</p>
+      </header>
+
+      <main class="client-workspace intake-workspace">
+        <header class="client-form-hero intake-hero">
+          <h1>Launch a Listing Ad Campaign</h1>
+          <p>Fill this out and our team takes it from here. Takes about 2 minutes.</p>
+        </header>
+
+        <form id="intake-form" class="client-report-form intake-form" method="post" action="/api/intake">
+          <input type="hidden" name="intake_token" value={token} />
+          <div class="intake-hp" aria-hidden="true">
+            <label for="intake-website-url">Your website</label>
+            <input
+              id="intake-website-url"
+              type="text"
+              name="website_url"
+              tabindex="-1"
+              autocomplete="off"
+            />
+          </div>
+
+          <section class="client-form-card">
+            <div class="client-section-header">
+              <span>01</span>
+              <div>
+                <h2>Listing Address</h2>
+                <p>The property this ad campaign is for.</p>
+              </div>
+            </div>
+            <div class="client-field-grid">
+              <label class="client-field wide">
+                <span>Listing Address</span>
+                <input
+                  name="listing_address"
+                  placeholder="123 Main Street, Kelowna"
+                  maxlength="200"
+                  autocomplete="street-address"
+                  required
+                />
+              </label>
+            </div>
+          </section>
+
+          <section class="client-form-card">
+            <div class="client-section-header">
+              <span>02</span>
+              <div>
+                <h2>Budget &amp; Campaign</h2>
+                <p>Pick the ad budget and tell us if this is a new campaign or an extension.</p>
+              </div>
+            </div>
+            <div class="client-field-grid">
+              <div class="client-field wide">
+                <span>Ad Budget</span>
+                <div class="intake-pill-grid budget" role="radiogroup" aria-label="Ad budget">
+                  <label class="intake-pill">
+                    <input type="radio" name="ad_budget" value="50" required />
+                    <span class="intake-pill-face">$50</span>
+                  </label>
+                  <label class="intake-pill">
+                    <input type="radio" name="ad_budget" value="100" required />
+                    <span class="intake-pill-face">$100</span>
+                  </label>
+                  <label class="intake-pill">
+                    <input type="radio" name="ad_budget" value="150" required />
+                    <span class="intake-pill-face">$150</span>
+                  </label>
+                  <label class="intake-pill">
+                    <input type="radio" name="ad_budget" value="200" required />
+                    <span class="intake-pill-face">$200</span>
+                  </label>
+                </div>
+              </div>
+              <div class="client-field wide">
+                <span>Campaign Type</span>
+                <div class="intake-pill-grid type" role="radiogroup" aria-label="Campaign type">
+                  <label class="intake-pill">
+                    <input type="radio" name="campaign_type" value="new" checked required />
+                    <span class="intake-pill-face">New Ad Campaign</span>
+                  </label>
+                  <label class="intake-pill">
+                    <input type="radio" name="campaign_type" value="extend" required />
+                    <span class="intake-pill-face">Extend Existing Campaign</span>
+                  </label>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <section class="client-form-card">
+            <div class="client-section-header">
+              <span>03</span>
+              <div>
+                <h2>Location Targeting</h2>
+                <p>List up to 10 towns/cities to target (closest first).</p>
+              </div>
+            </div>
+            <div class="client-field-grid">
+              <label class="client-field wide">
+                <span>City 1</span>
+                <input name="city_1" placeholder="Kelowna" maxlength="80" required />
+              </label>
+              <label class="client-field wide">
+                <span>City 2</span>
+                <input name="city_2" placeholder="West Kelowna" maxlength="80" />
+              </label>
+              <label class="client-field wide">
+                <span>City 3</span>
+                <input name="city_3" placeholder="Lake Country" maxlength="80" />
+              </label>
+              <details class="intake-more-cities">
+                <summary>Add more cities</summary>
+                <div class="client-field-grid">
+                  <label class="client-field wide">
+                    <span>City 4</span>
+                    <input name="city_4" maxlength="80" />
+                  </label>
+                  <label class="client-field wide">
+                    <span>City 5</span>
+                    <input name="city_5" maxlength="80" />
+                  </label>
+                  <label class="client-field wide">
+                    <span>City 6</span>
+                    <input name="city_6" maxlength="80" />
+                  </label>
+                  <label class="client-field wide">
+                    <span>City 7</span>
+                    <input name="city_7" maxlength="80" />
+                  </label>
+                  <label class="client-field wide">
+                    <span>City 8</span>
+                    <input name="city_8" maxlength="80" />
+                  </label>
+                  <label class="client-field wide">
+                    <span>City 9</span>
+                    <input name="city_9" maxlength="80" />
+                  </label>
+                  <label class="client-field wide">
+                    <span>City 10</span>
+                    <input name="city_10" maxlength="80" />
+                  </label>
+                </div>
+              </details>
+            </div>
+          </section>
+
+          <section class="client-form-card">
+            <div class="client-section-header">
+              <span>04</span>
+              <div>
+                <h2>Photos &amp; Listing Stats</h2>
+                <p>Where we grab the listing photos and the REALTOR.ca stats link.</p>
+              </div>
+            </div>
+            <div class="client-field-grid">
+              <label class="client-field wide">
+                <span>Photos — Dropbox / Google Drive Link</span>
+                <input
+                  class="client-url-input"
+                  type="url"
+                  name="photos_link"
+                  inputmode="url"
+                  placeholder="https://www.dropbox.com/..."
+                  required
+                />
+                <small class="intake-helper">Please share a folder containing exactly 10 photos of the listing.</small>
+              </label>
+              <label class="client-field wide">
+                <span>REALTOR.CA Report Stats Link</span>
+                <input
+                  class="client-url-input"
+                  type="url"
+                  name="realtor_stats_link"
+                  inputmode="url"
+                  placeholder="https://www.realtor.ca/..."
+                  required
+                />
+              </label>
+              <div class="intake-tip">
+                Tip: Top right corner when signed into Realtor.ca is a SHARE LISTING button, you can also share the link with yourself and then paste it here.
+              </div>
+            </div>
+          </section>
+
+          <section class="client-form-card">
+            <div class="client-section-header">
+              <span>05</span>
+              <div>
+                <h2>Special notes</h2>
+                <p>Anything else we should know? (optional)</p>
+              </div>
+            </div>
+            <div class="client-field-grid">
+              <label class="client-field wide">
+                <span>Notes</span>
+                <textarea
+                  name="notes"
+                  rows="4"
+                  maxlength="600"
+                  placeholder="Anything else we should know? (optional)"
+                ></textarea>
+              </label>
+            </div>
+          </section>
+
+          <div class="intake-submit-bar">
+            <button class="client-submit-button intake-submit-button" type="submit" data-submit-button>
+              Submit Ad Campaign Request
+            </button>
+          </div>
+        </form>
+      </main>
+
+      <script>
+        // Double-submit guard only — the form is fully functional without JS.
+        const form = document.getElementById("intake-form") as HTMLFormElement | null;
+        const submitButton = document.querySelector("[data-submit-button]") as HTMLButtonElement | null;
+
+        form?.addEventListener("submit", () => {
+          if (submitButton) {
+            submitButton.disabled = true;
+            submitButton.textContent = "Submitting...";
+          }
+        });
+
+        // Returning via the Back button (bfcache) restores the disabled state —
+        // re-enable so the client can fix a validation error and resubmit.
+        window.addEventListener("pageshow", () => {
+          if (submitButton) {
+            submitButton.disabled = false;
+            submitButton.textContent = "Submit Ad Campaign Request";
+          }
+        });
+      </script>
+    </div>
+  ) : (
+    <main class="form-shell">
+      <section class="panel">
+        <h1>Link not active</h1>
+        <p>This link is not active. Please contact Supersonic Sites.</p>
+      </section>
+    </main>
+  )}
+</AppLayout>
+
+<style>
+  .intake-shell {
+    min-height: 100vh;
+  }
+
+  .intake-brand {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    padding: 14px 20px;
+    border-bottom: 1px solid var(--ss-border);
+    border-top: 4px solid var(--brand-primary, var(--ss-accent));
+    background: var(--ss-surface);
+  }
+
+  .intake-brand-logo {
+    height: 60px;
+    width: auto;
+    max-width: 200px;
+    object-fit: contain;
+  }
+
+  .intake-brand-line {
+    margin: 0;
+    color: var(--ss-text-soft);
+    font-size: 0.85rem;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+  }
+
+  .intake-workspace {
+    width: min(720px, calc(100vw - 32px));
+  }
+
+  .intake-hero {
+    padding-top: 32px;
+  }
+
+  /* iOS zooms the viewport on focus when inputs are under 16px. */
+  .intake-form input,
+  .intake-form textarea {
+    font-size: 16px;
+  }
+
+  /* Public form is a single narrow column — collapse the two-column card layout. */
+  .intake-form :global(.client-form-card) {
+    grid-template-columns: 1fr;
+    gap: 18px;
+  }
+
+  /* Honeypot: parked off-screen, never display:none (some bots skip hidden fields). */
+  .intake-hp {
+    position: absolute;
+    left: -9999px;
+    top: auto;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+  }
+
+  .intake-pill-grid {
+    display: grid;
+    gap: 10px;
+  }
+
+  .intake-pill-grid.budget {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .intake-pill-grid.type {
+    grid-template-columns: 1fr;
+  }
+
+  @media (min-width: 560px) {
+    .intake-pill-grid.budget {
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+    }
+
+    .intake-pill-grid.type {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+  }
+
+  .intake-pill {
+    position: relative;
+    display: block;
+    cursor: pointer;
+  }
+
+  .intake-pill input {
+    position: absolute;
+    opacity: 0;
+    width: 1px;
+    height: 1px;
+  }
+
+  .intake-pill-face {
+    display: flex;
+    min-height: 48px;
+    align-items: center;
+    justify-content: center;
+    padding: 0.5rem 0.75rem;
+    border: 1px solid var(--ss-border-strong);
+    border-radius: var(--ss-radius-sm);
+    background: var(--ss-surface);
+    color: var(--ss-text);
+    font-size: 1rem;
+    font-weight: 600;
+    text-align: center;
+    transition: border-color 140ms ease, background 140ms ease, box-shadow 140ms ease;
+  }
+
+  .intake-pill input:checked + .intake-pill-face {
+    border-color: var(--brand-primary, var(--ss-accent));
+    background: var(--ss-accent-soft);
+    color: var(--ss-ink);
+    box-shadow: inset 0 0 0 1px var(--brand-primary, var(--ss-accent));
+  }
+
+  .intake-pill input:focus-visible + .intake-pill-face {
+    outline: 2px solid var(--ss-accent);
+    outline-offset: 2px;
+  }
+
+  .intake-more-cities {
+    border: 1px dashed var(--ss-border-strong);
+    border-radius: var(--ss-radius-sm);
+    padding: 12px 14px;
+  }
+
+  .intake-more-cities summary {
+    cursor: pointer;
+    color: var(--ss-accent-ink);
+    font-size: 0.9rem;
+    font-weight: 600;
+  }
+
+  .intake-more-cities[open] summary {
+    margin-bottom: 12px;
+  }
+
+  .intake-helper {
+    color: var(--ss-muted);
+    font-size: 0.82rem;
+    font-weight: 500;
+    line-height: 1.5;
+  }
+
+  .intake-tip {
+    border-left: 3px solid var(--brand-accent, var(--ss-accent));
+    border-radius: var(--ss-radius-sm);
+    background: var(--ss-accent-soft);
+    color: var(--ss-accent-ink);
+    font-size: 0.85rem;
+    font-weight: 500;
+    line-height: 1.55;
+    padding: 10px 14px;
+  }
+
+  .intake-submit-bar {
+    padding: 4px 0 8px;
+  }
+
+  .intake-submit-button {
+    width: 100%;
+    min-height: 52px;
+    border: none;
+    cursor: pointer;
+    background: var(--ss-ink);
+    color: #ffffff;
+    font-size: 1rem;
+  }
+
+  .intake-submit-button:hover:not(:disabled) {
+    background: var(--ss-accent-deep);
+  }
+
+  .intake-submit-button:disabled {
+    cursor: wait;
+    opacity: 0.72;
+  }
+
+  @media (max-width: 759px) {
+    .intake-brand {
+      gap: 12px;
+      padding: 10px 16px;
+    }
+
+    .intake-brand-logo {
+      height: 56px;
+    }
+
+    .intake-submit-bar {
+      position: sticky;
+      bottom: 0;
+      margin: 0 -16px;
+      padding: 12px 16px calc(12px + env(safe-area-inset-bottom));
+      background: rgba(245, 247, 250, 0.94);
+      backdrop-filter: blur(6px);
+      border-top: 1px solid var(--ss-border);
+    }
+  }
+</style>

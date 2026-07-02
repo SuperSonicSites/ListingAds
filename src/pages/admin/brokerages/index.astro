@@ -1,0 +1,150 @@
+---
+import AppLayout from "../../../layouts/AppLayout.astro";
+import SiteHeader from "../../../components/SiteHeader.astro";
+import { listBrokerages } from "../../../lib/storage";
+
+const brokerages = await listBrokerages();
+const origin = Astro.url.origin;
+---
+
+<AppLayout title="Brokerages | Supersonic Ad Manager" className="app-body">
+  <SiteHeader context="Brokerages">
+    <a class="nav-link" href="/admin/brokerages/new">New brokerage</a>
+  </SiteHeader>
+
+  <main class="app-shell">
+    <section class="app-hero">
+      <div>
+        <p class="eyebrow">Client roster</p>
+        <h1>Brokerages</h1>
+        <p>
+          Each brokerage gets a dedicated intake link — share it once and every
+          ad request they submit lands on the board automatically.
+        </p>
+      </div>
+      <div class="hero-actions">
+        <a class="button primary" href="/admin/brokerages/new">New brokerage</a>
+      </div>
+    </section>
+
+    <section class="panel">
+      <div class="section-heading">
+        <div>
+          <p class="eyebrow">Roster</p>
+          <h2>Brokerage profiles</h2>
+        </div>
+        <span class="count-badge">{brokerages.length} {brokerages.length === 1 ? "brokerage" : "brokerages"}</span>
+      </div>
+
+      {brokerages.length > 0 ? (
+        <div class="client-grid">
+          {brokerages.map((brokerage) => {
+            const intakeUrl = `${origin}/intake/${brokerage.intake_token}`;
+            const location = [brokerage.address_city, brokerage.address_province].filter(Boolean).join(", ");
+            return (
+              <article class="client-card">
+                <div class="client-card-logo">
+                  <img src={brokerage.logo_url} alt={`${brokerage.name} logo`} />
+                </div>
+                <div>
+                  <h3>{brokerage.name}</h3>
+                  <p>{brokerage.contact_name} · {brokerage.contact_email}</p>
+                  {location && <p>{location}</p>}
+                  <div class="client-card-links">
+                    <a class="button ghost sm" href={`/admin/brokerages/${brokerage.slug}/edit`}>Edit</a>
+                  </div>
+                </div>
+                <div class="intake-strip">
+                  <span class="intake-label">Intake link</span>
+                  <code class="intake-url" title={intakeUrl}>{intakeUrl}</code>
+                  <div class="intake-actions">
+                    <button class="button secondary sm" type="button" data-copy={intakeUrl}>Copy</button>
+                    <a class="button ghost sm" href={intakeUrl} target="_blank" rel="noopener">Open form</a>
+                  </div>
+                </div>
+              </article>
+            );
+          })}
+        </div>
+      ) : (
+        <div class="empty-state">
+          <strong>No brokerages yet</strong>
+          <p>Create your first brokerage profile to get a shareable intake link.</p>
+          <a class="button primary" href="/admin/brokerages/new">New brokerage</a>
+        </div>
+      )}
+    </section>
+  </main>
+</AppLayout>
+
+<style>
+  /* The intake link spans the full card width beneath logo + details. */
+  .intake-strip {
+    display: grid;
+    gap: 8px;
+    grid-column: 1 / -1;
+    border-top: 1px solid var(--ss-border);
+    margin-top: 4px;
+    padding-top: 12px;
+  }
+
+  .intake-label {
+    color: var(--ss-muted);
+    font-size: 0.72rem;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+
+  .intake-url {
+    overflow: hidden;
+    border: 1px solid var(--ss-border);
+    border-radius: var(--ss-radius-sm);
+    background: var(--ss-bg);
+    padding: 7px 10px;
+    color: var(--ss-ink);
+    font-size: 0.78rem;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .intake-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+</style>
+
+<script>
+  // Clipboard copy with a legacy fallback (execCommand) for non-secure contexts.
+  function fallbackCopy(text: string) {
+    const area = document.createElement("textarea");
+    area.value = text;
+    area.setAttribute("readonly", "");
+    area.style.position = "fixed";
+    area.style.opacity = "0";
+    document.body.appendChild(area);
+    area.select();
+    try {
+      document.execCommand("copy");
+    } finally {
+      area.remove();
+    }
+  }
+
+  document.querySelectorAll<HTMLButtonElement>("[data-copy]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      const text = button.dataset.copy ?? "";
+      try {
+        await navigator.clipboard.writeText(text);
+      } catch {
+        fallbackCopy(text);
+      }
+      const original = button.textContent;
+      button.textContent = "Copied ✓";
+      setTimeout(() => {
+        button.textContent = original;
+      }, 1600);
+    });
+  });
+</script>

@@ -1,0 +1,260 @@
+---
+import type { AdRequest, Brokerage } from "../lib/types";
+import { taskFor } from "../lib/status";
+import { daysBetween } from "../lib/dates";
+import { formatDate } from "../lib/format";
+
+// One card on the board. The whole card links to the request detail page via a
+// stretched link; the only transition allowed from a card is the zero-input
+// "Approve post" (post_created -> post_reviewed).
+type Props = {
+  request: AdRequest;
+  brokerage?: Brokerage | undefined;
+  today: string; // YYYY-MM-DD, America/Vancouver
+};
+
+const { request, brokerage, today } = Astro.props;
+
+// A request whose brokerage was deleted still renders — slug stands in for the
+// name (taskFor only reads brokerage.name).
+const brokerageName = brokerage?.name ?? request.brokerage_slug;
+const task = taskFor(request, brokerage ?? ({ name: brokerageName } as Brokerage), today);
+
+const ageDays = daysBetween(request.created_at.slice(0, 10), today);
+const ageLabel = ageDays <= 0 ? "today" : `${ageDays}d ago`;
+
+const due = request.report_due_date ?? "";
+const overdueDays = due ? daysBetween(due, today) : 0; // positive = past due
+---
+
+<article class="kanban-card">
+  <div class="kanban-top">
+    <span class="kanban-logo">
+      {brokerage?.logo_url ? <img src={brokerage.logo_url} alt="" /> : <span>{brokerageName.slice(0, 1).toUpperCase()}</span>}
+    </span>
+    <span class="kanban-brokerage">{brokerageName}</span>
+  </div>
+
+  <a class="kanban-address" href={`/requests/${request.id}`}>{request.listing_address}</a>
+
+  <div class="kanban-chips">
+    <span class="chip">$ {request.ad_budget}</span>
+    {request.campaign_type === "extend" && <span class="chip amber">EXTEND</span>}
+    <span class="chip muted">{ageLabel}</span>
+  </div>
+
+  {task && <p class="kanban-task">{task}</p>}
+
+  {request.short_link && <p class="kanban-shortlink" title={request.short_link.url}>🔗 {request.short_link.url}</p>}
+
+  {request.status === "post_created" && (
+    <div class="kanban-foot">
+      <span class="badge">Awaiting review</span>
+      <form method="post" action={`/api/requests/${request.id}/status`}>
+        <input type="hidden" name="to" value="post_reviewed" />
+        <button class="button secondary sm" type="submit">Approve post</button>
+      </form>
+    </div>
+  )}
+
+  {request.status === "ad_published" && request.ad_launch_date && (
+    <div class="kanban-foot">
+      <span class="badge">Launched {formatDate(request.ad_launch_date)}</span>
+    </div>
+  )}
+
+  {request.status === "campaign_in_progress" && (
+    <div class="kanban-foot">
+      {!due && <span class="badge">No due date set</span>}
+      {due && overdueDays > 0 && <span class="badge red">Report overdue {overdueDays}d</span>}
+      {due && overdueDays === 0 && <span class="badge amber">Report due today</span>}
+      {due && overdueDays < 0 && <span class="badge green">Report due {formatDate(due)}</span>}
+      {request.reminder_last_sent_date && <span class="reminded">reminded ✓</span>}
+    </div>
+  )}
+
+  {request.status === "completed" && request.report_sent_at && (
+    <div class="kanban-foot">
+      <span class="badge green">Report sent {formatDate(request.report_sent_at.slice(0, 10))}</span>
+    </div>
+  )}
+</article>
+
+<style>
+  .kanban-card {
+    position: relative;
+    display: grid;
+    gap: 9px;
+    border: 1px solid var(--ss-border);
+    border-radius: var(--ss-radius);
+    background: var(--ss-surface);
+    padding: 13px 14px;
+    box-shadow: var(--ss-shadow-sm);
+    transition: border-color 140ms ease, box-shadow 140ms ease;
+  }
+
+  .kanban-card:hover {
+    border-color: #bcd9ec;
+    box-shadow: var(--ss-shadow);
+  }
+
+  .kanban-top {
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    min-width: 0;
+  }
+
+  /* Dark tile behind logos: most realtor logos are drawn light-on-dark. */
+  .kanban-logo {
+    display: flex;
+    width: 36px;
+    height: 36px;
+    flex: 0 0 auto;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+    border-radius: 8px;
+    background: #101725;
+    padding: 5px;
+    color: #ffffff;
+    font-size: 0.8rem;
+    font-weight: 700;
+  }
+
+  .kanban-logo img {
+    max-width: 100%;
+    max-height: 100%;
+    object-fit: contain;
+  }
+
+  .kanban-brokerage {
+    overflow: hidden;
+    color: var(--ss-muted);
+    font-size: 0.78rem;
+    font-weight: 600;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
+
+  .kanban-address {
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+    overflow: hidden;
+    color: var(--ss-ink);
+    font-size: 0.95rem;
+    font-weight: 700;
+    letter-spacing: -0.01em;
+    line-height: 1.3;
+    text-decoration: none;
+  }
+
+  /* Stretched link: the address anchor covers the whole card. */
+  .kanban-address::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+  }
+
+  .kanban-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+
+  .chip {
+    display: inline-flex;
+    align-items: center;
+    border: 1px solid var(--ss-border);
+    border-radius: 999px;
+    background: var(--ss-bg);
+    padding: 2px 9px;
+    color: var(--ss-text-soft);
+    font-size: 0.72rem;
+    font-weight: 650;
+    white-space: nowrap;
+  }
+
+  .chip.muted {
+    color: var(--ss-muted);
+  }
+
+  .chip.amber {
+    border-color: #fed7aa;
+    background: #fff7ed;
+    color: #9a3412;
+    letter-spacing: 0.05em;
+  }
+
+  .kanban-task {
+    margin: 0;
+    color: var(--ss-ink);
+    font-size: 0.8rem;
+    font-weight: 700;
+    line-height: 1.45;
+  }
+
+  .kanban-shortlink {
+    position: relative;
+    z-index: 1;
+    overflow: hidden;
+    margin: 0;
+    color: var(--ss-accent-ink);
+    font-size: 0.76rem;
+    font-weight: 600;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
+
+  .kanban-foot {
+    position: relative;
+    z-index: 1;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .badge {
+    display: inline-flex;
+    align-items: center;
+    border: 1px solid var(--ss-border);
+    border-radius: 999px;
+    background: var(--ss-bg);
+    padding: 3px 10px;
+    color: var(--ss-text-soft);
+    font-size: 0.73rem;
+    font-weight: 650;
+    white-space: nowrap;
+  }
+
+  .badge.green {
+    border-color: #a7f3d0;
+    background: #ecfdf5;
+    color: #047857;
+  }
+
+  .badge.amber {
+    border-color: #fed7aa;
+    background: #fff7ed;
+    color: #9a3412;
+  }
+
+  .badge.red {
+    border-color: #fecaca;
+    background: #fef2f2;
+    color: #b91c1c;
+  }
+
+  .reminded {
+    color: var(--ss-muted);
+    font-size: 0.7rem;
+    font-weight: 600;
+    white-space: nowrap;
+  }
+
+  .kanban-foot form {
+    margin-left: auto;
+  }
+</style>

@@ -1,0 +1,183 @@
+---
+import AppLayout from "../../../layouts/AppLayout.astro";
+import { findBrokerageByToken } from "../../../lib/storage";
+
+const token = Astro.params.token ?? "";
+const brokerage = /^[a-f0-9]{32}$/.test(token) ? await findBrokerageByToken(token) : undefined;
+if (!brokerage) {
+  Astro.response.status = 404;
+}
+
+const address = (Astro.url.searchParams.get("address") ?? "").trim().slice(0, 200);
+
+const brandStyle = brokerage
+  ? `--brand-primary: ${brokerage.brand_primary}; --brand-accent: ${brokerage.brand_accent};`
+  : "";
+---
+
+<AppLayout
+  title={brokerage ? `Request Received | ${brokerage.name}` : "Link not active"}
+  className="client-form-body"
+>
+  {brokerage ? (
+    <div class="intake-shell" style={brandStyle}>
+      <header class="intake-brand">
+        <img class="intake-brand-logo" src={brokerage.logo_url} alt={`${brokerage.name} logo`} />
+        <p class="intake-brand-line">Ad Campaign Request — powered by Supersonic Sites</p>
+      </header>
+
+      <main class="intake-thanks-shell">
+        <section class="panel intake-thanks-panel">
+          <p class="eyebrow">Request received</p>
+          <h1>You're all set. 🚀</h1>
+          <p>
+            {address ? (
+              <>Your ad campaign request for <strong>{address}</strong> is in the queue and our rocket engineers are on it. Here's what happens next:</>
+            ) : (
+              <>Your ad campaign request is in the queue and our rocket engineers are on it. Here's what happens next:</>
+            )}
+          </p>
+
+          <ol class="intake-next-steps">
+            <li>
+              <strong>Expert Setup</strong>
+              <span>Our team is already reviewing your submission and crafting high-impact ad creatives tailored to your listing, brand and market.</span>
+            </li>
+            <li>
+              <strong>Launch Confirmation</strong>
+              <span>You'll receive an email once your ad passes our internal review and goes live.</span>
+            </li>
+            <li>
+              <strong>Executive Report</strong>
+              <span>Approximately two weeks after launch, you'll get an Executive Report ready to forward to your seller.</span>
+            </li>
+          </ol>
+
+          <p>A confirmation email is on its way to your inbox. Questions? Just reply to it.</p>
+
+          <div class="intake-thanks-actions">
+            <a class="button secondary" href={`/intake/${token}`}>Submit another listing</a>
+          </div>
+        </section>
+      </main>
+    </div>
+  ) : (
+    <main class="form-shell">
+      <section class="panel">
+        <h1>Link not active</h1>
+        <p>This link is not active. Please contact Supersonic Sites.</p>
+      </section>
+    </main>
+  )}
+</AppLayout>
+
+<style>
+  .intake-shell {
+    min-height: 100vh;
+  }
+
+  .intake-brand {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    padding: 14px 20px;
+    border-bottom: 1px solid var(--ss-border);
+    border-top: 4px solid var(--brand-primary, var(--ss-accent));
+    background: var(--ss-surface);
+  }
+
+  .intake-brand-logo {
+    height: 60px;
+    width: auto;
+    max-width: 200px;
+    object-fit: contain;
+  }
+
+  .intake-brand-line {
+    margin: 0;
+    color: var(--ss-text-soft);
+    font-size: 0.85rem;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+  }
+
+  .intake-thanks-shell {
+    width: min(640px, calc(100vw - 32px));
+    margin: 0 auto;
+    padding: 40px 0 72px;
+  }
+
+  .intake-thanks-panel {
+    text-align: center;
+  }
+
+  .intake-next-steps {
+    display: grid;
+    gap: 14px;
+    margin: 24px 0 0;
+    padding: 0;
+    list-style: none;
+    counter-reset: intake-step;
+    text-align: left;
+  }
+
+  .intake-next-steps li {
+    display: grid;
+    grid-template-columns: 34px 1fr;
+    grid-template-rows: auto auto;
+    column-gap: 12px;
+    align-items: start;
+    counter-increment: intake-step;
+    border: 1px solid var(--ss-border);
+    border-radius: var(--ss-radius);
+    background: var(--ss-bg);
+    padding: 14px 16px;
+  }
+
+  .intake-next-steps li::before {
+    content: counter(intake-step);
+    grid-row: 1 / span 2;
+    display: inline-flex;
+    width: 30px;
+    height: 30px;
+    align-items: center;
+    justify-content: center;
+    border-radius: var(--ss-radius-sm);
+    background: var(--ss-accent-soft);
+    color: var(--ss-accent-ink);
+    font-size: 0.8rem;
+    font-weight: 700;
+  }
+
+  .intake-next-steps li strong {
+    color: var(--ss-ink);
+    font-size: 0.95rem;
+  }
+
+  .intake-next-steps li span {
+    color: var(--ss-text-soft);
+    font-size: 0.88rem;
+    line-height: 1.6;
+  }
+
+  .intake-thanks-panel > p:last-of-type {
+    margin-top: 22px;
+  }
+
+  .intake-thanks-actions {
+    display: flex;
+    justify-content: center;
+    padding-top: 20px;
+  }
+
+  @media (max-width: 759px) {
+    .intake-brand {
+      gap: 12px;
+      padding: 10px 16px;
+    }
+
+    .intake-brand-logo {
+      height: 56px;
+    }
+  }
+</style>
